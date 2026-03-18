@@ -17,7 +17,7 @@ import {
   deactivateKeepAlive,
 } from "even-toolkit/keep-alive";
 import { buildActionBar, buildStaticActionBar } from "even-toolkit/action-bar";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 
 import { buildHeaderLine } from "even-toolkit/text-utils";
 import { line } from "even-toolkit/types";
@@ -128,7 +128,12 @@ interface AppState {
   highlightedIndex: number;
   isLoading: boolean;
   messageScrollOffset: number; // For scrolling through messages
+  demoMode: boolean; // Easter egg: force demo mode with fake data
 }
+
+// Demo mode trigger: 5 clicks within 1 second
+const DEMO_MODE_CLICKS = 5;
+const DEMO_MODE_WINDOW_MS = 1000;
 
 // ═══════════════════════════════════════════════════════════════
 // UTILITY FUNCTIONS
@@ -254,12 +259,13 @@ function buildAccountsDisplay(
 ): DisplayLine[] {
   const lines: DisplayLine[] = [];
 
-  // Header: "Even Messages" + time
+  // Header: "Even Messages" + time (+ DEMO indicator if active)
   const time = new Date().toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
-  lines.push(line(buildHeaderLine("Even Messages", time), "inverted"));
+  const title = state.demoMode ? "Even [DEMO]" : "Even Messages";
+  lines.push(line(buildHeaderLine(title, time), "inverted"));
 
   // "All Chats" option
   const allSelected = highlightedIdx === 0;
@@ -687,12 +693,16 @@ export function GlassesUI({
     highlightedIndex: 0,
     isLoading: true,
     messageScrollOffset: savedState.chatScrollPosition || 0,
+    demoMode: false,
   });
 
   const beeper = beeperConfig ? new BeeperClient(beeperConfig) : null;
 
   // Flash phase for blinking action indicators
   const flashPhase = useFlashPhase(true);
+
+  // Demo mode: click timestamps tracked in onGlassAction
+  const clickTimestamps = useRef<number[]>([]);
 
   // Load initial data
   useEffect(() => {
@@ -878,6 +888,16 @@ export function GlassesUI({
   // Load chats
   function loadChats(accountId: string | null) {
     async function doLoad() {
+      // In demo mode, always use demo data
+      if (state.demoMode) {
+        setState((s) => ({
+          ...s,
+          chats: getDemoChats(),
+          isLoading: false,
+        }));
+        return;
+      }
+      
       try {
         let chats: BeeperChat[] = [];
         if (beeper) {
@@ -901,6 +921,23 @@ export function GlassesUI({
   // Load messages
   function loadMessages(chatId: string) {
     async function doLoad() {
+      // In demo mode, always use demo data
+      if (state.demoMode) {
+        const demoMessages = getDemoMessages();
+        const LINES_FOR_MESSAGES = DISPLAY_LINES - 3;
+        const maxScroll = Math.max(0, demoMessages.length - LINES_FOR_MESSAGES);
+        const initialScroll = Math.min(maxScroll, Math.max(0, demoMessages.length - 1));
+        
+        setState((s) => ({
+          ...s,
+          messages: demoMessages,
+          isLoading: false,
+          highlightedIndex: 0,
+          messageScrollOffset: initialScroll,
+        }));
+        return;
+      }
+      
       try {
         let messages: BeeperMessage[] = [];
         if (beeper) {
@@ -1049,6 +1086,34 @@ export function GlassesUI({
         }
 
         case "SELECT_HIGHLIGHTED": {
+          // Track clicks for demo mode easter egg
+          const now = Date.now();
+          clickTimestamps.current.push(now);
+          clickTimestamps.current = clickTimestamps.current.filter(
+            t => now - t < DEMO_MODE_WINDOW_MS
+          );
+          
+          // Check for 5 rapid clicks to toggle demo mode
+          if (clickTimestamps.current.length >= DEMO_MODE_CLICKS) {
+            clickTimestamps.current = [];
+            setState((s) => {
+              const newDemoMode = !s.demoMode;
+              console.log(`[GlassesUI] Demo mode ${newDemoMode ? 'ENABLED' : 'DISABLED'}`);
+              // Reset to accounts screen when toggling demo mode
+              return { 
+                ...s, 
+                demoMode: newDemoMode,
+                currentScreen: "accounts",
+                selectedAccount: null,
+                selectedChat: null,
+                accounts: newDemoMode ? [] : s.accounts,
+                chats: newDemoMode ? [] : s.chats,
+                messages: newDemoMode ? [] : s.messages,
+              };
+            });
+            return nav;
+          }
+          
           setState((s) => {
             const updates = handleSelect(s);
             return { ...s, ...updates };
