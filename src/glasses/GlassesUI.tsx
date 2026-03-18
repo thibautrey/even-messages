@@ -32,8 +32,8 @@ import { useGlasses } from "even-toolkit/useGlasses";
 // Font: 22px Courier New monospace (~12px per char)
 // Visible width: ~48 chars, but leaving padding, use 40 chars
 const MAX_VISIBLE_ITEMS = 8; // Max items visible on screen
-const VISIBLE_MESSAGES = 8; // Number of messages to show per page
 const DISPLAY_WIDTH = 70; // Max characters per line
+const DISPLAY_LINES = 7; // Max lines on Even G2 display (288px / ~40px per line)
 const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 
 // LocalStorage key for persisting state
@@ -358,22 +358,54 @@ function buildMessagesDisplay(
     line(buildHeaderLine(`${ICONS.BACK} ${chatName}`, ""), "inverted"),
   );
 
-  // Calculate scroll window - show VISIBLE_MESSAGES from end or from offset
+  // Calculate scroll window
   const totalMessages = state.messages.length;
-  const scrollOffset = Math.min(
-    state.messageScrollOffset,
-    Math.max(0, totalMessages - VISIBLE_MESSAGES),
-  );
+  const maxScroll = Math.max(0, totalMessages - 1);
+  const scrollOffset = Math.min(state.messageScrollOffset, maxScroll);
+
+  // Track line count: header (1) + separator (1) + action bar (1) = 3 fixed
+  // We need room for 1 more line for "[more above" indicator if needed
+  let usedLines = 3; // separator + action bar + buffer
+  const MAX_MESSAGE_LINES = DISPLAY_LINES - usedLines;
 
   // Show indicator if there are more messages above
-  if (scrollOffset > 0) {
+  const hasMoreAbove = scrollOffset > 0;
+  if (hasMoreAbove) {
     lines.push(line("[more above]", "meta"));
+    usedLines++;
   }
 
-  // Get messages to display
-  const endIndex = Math.min(scrollOffset + VISIBLE_MESSAGES, totalMessages);
-  const visibleMessages = state.messages.slice(scrollOffset, endIndex);
+  // Get messages to display, respecting line limit
+  const visibleMessages: BeeperMessage[] = [];
+  const moreBelowIndices: { above: number; below: number } = { above: 0, below: 0 };
+  let currentLineCount = 0;
 
+  // Start from scroll position and go forward
+  for (let i = scrollOffset; i < totalMessages && currentLineCount < MAX_MESSAGE_LINES; i++) {
+    const msg = state.messages[i];
+    const time = formatTime(msg.timestamp);
+    const sender = msg.isSender
+      ? ">"
+      : truncateName(msg.senderName || "?", 8);
+    const prefix = `[${time}] ${sender}: `;
+
+    // Strip unsupported characters and wrap message content
+    const content = stripUnsupportedChars(msg.text || "[media]");
+    const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
+    const msgLineCount = wrappedLines.length;
+
+    // Check if this message fits
+    if (currentLineCount + msgLineCount <= MAX_MESSAGE_LINES) {
+      visibleMessages.push(msg);
+      currentLineCount += msgLineCount;
+    } else {
+      // Calculate how many messages are below
+      moreBelowIndices.below = totalMessages - i;
+      break;
+    }
+  }
+
+  // Render visible messages
   if (visibleMessages.length === 0) {
     lines.push(line("No messages yet - send one!", "normal"));
   } else {
@@ -384,7 +416,7 @@ function buildMessagesDisplay(
         : truncateName(msg.senderName || "?", 8);
       const prefix = `[${time}] ${sender}: `;
 
-      // Strip unsupported characters (emoji, etc) and wrap message content
+      // Strip unsupported characters and wrap message content
       const content = stripUnsupportedChars(msg.text || "[media]");
       const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
 
@@ -399,7 +431,9 @@ function buildMessagesDisplay(
   }
 
   // Show indicator if there are more messages below
-  if (endIndex < totalMessages) {
+  const lastShownIndex = scrollOffset + visibleMessages.length - 1;
+  const hasMoreBelow = lastShownIndex < totalMessages - 1;
+  if (hasMoreBelow) {
     lines.push(line("[more below]", "meta"));
   }
 
@@ -853,7 +887,7 @@ export function GlassesUI({
         }
         const finalMessages = messages.length > 0 ? messages : getDemoMessages();
         // Calculate scroll offset to show latest messages (at bottom)
-        const maxScroll = Math.max(0, finalMessages.length - VISIBLE_MESSAGES);
+        const maxScroll = Math.max(0, finalMessages.length - 1);
         
         setState((s) => ({
           ...s,
@@ -864,7 +898,7 @@ export function GlassesUI({
         }));
       } catch {
         const demoMessages = getDemoMessages();
-        const maxScroll = Math.max(0, demoMessages.length - VISIBLE_MESSAGES);
+        const maxScroll = Math.max(0, demoMessages.length - 1);
         
         setState((s) => ({
           ...s,
@@ -947,7 +981,7 @@ export function GlassesUI({
           // Handle scrolling in messages screen
           if (snapshot.currentScreen === "messages") {
             const totalMessages = snapshot.messages.length;
-            const maxScroll = Math.max(0, totalMessages - VISIBLE_MESSAGES);
+            const maxScroll = Math.max(0, totalMessages - 1);
             const newScroll = Math.max(
               0,
               Math.min(
