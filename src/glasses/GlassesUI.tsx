@@ -36,6 +36,16 @@ const VISIBLE_MESSAGES = 8; // Number of messages to show per page
 const DISPLAY_WIDTH = 70; // Max characters per line
 const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 
+// LocalStorage key for persisting state
+const STORAGE_KEY = "even-messages-state";
+
+// Saved state interface
+interface SavedState {
+  selectedAccount: string | null;
+  selectedChat: string | null;
+  chatScrollPosition?: number;
+}
+
 // ASCII indicators (safe for glasses font)
 const ICONS = {
   SELECTED: ">",
@@ -56,6 +66,30 @@ const QUICK_REPLIES = [
   "Busy",
   "Later",
 ];
+
+// ═══════════════════════════════════════════════════════════════
+// PERSISTENCE
+// ═══════════════════════════════════════════════════════════════
+
+function loadSavedState(): SavedState {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    console.warn("[GlassesUI] Failed to load saved state:", e);
+  }
+  return { selectedAccount: null, selectedChat: null };
+}
+
+function saveState(state: SavedState): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("[GlassesUI] Failed to save state:", e);
+  }
+}
 
 // Helper: create a separator line (using meta style so text renders)
 function sep(): DisplayLine {
@@ -569,17 +603,20 @@ export function GlassesUI({
 }: {
   beeperConfig: { baseUrl: string; token: string } | null;
 }) {
+  // Load saved state from localStorage
+  const savedState = loadSavedState();
+
   const [state, setState] = useState<AppState>({
     accounts: [],
     chats: [],
     messages: [],
-    currentScreen: "accounts",
-    selectedAccount: null,
-    selectedChat: null,
+    currentScreen: savedState.selectedChat ? "messages" : savedState.selectedAccount ? "chats" : "accounts",
+    selectedAccount: savedState.selectedAccount,
+    selectedChat: savedState.selectedChat,
     selectedMessageIndex: 0,
     highlightedIndex: 0,
     isLoading: true,
-    messageScrollOffset: 0,
+    messageScrollOffset: savedState.chatScrollPosition || 0,
   });
 
   const beeper = beeperConfig ? new BeeperClient(beeperConfig) : null;
@@ -596,19 +633,44 @@ export function GlassesUI({
           accounts = await beeper.listAccounts();
         }
 
+        const initialChats = accounts.length === 0 ? getDemoChats() : [];
+        
         setState((s) => ({
           ...s,
           accounts,
-          chats: accounts.length === 0 ? getDemoChats() : [],
+          chats: initialChats,
           isLoading: false,
         }));
+
+        // If we had a saved chat, try to restore it
+        if (savedState.selectedChat) {
+          const chatExists = initialChats.some((c) => c.id === savedState.selectedChat);
+          if (chatExists) {
+            loadMessages(savedState.selectedChat);
+          } else {
+            // Chat no longer exists, clear saved state
+            saveState({ selectedAccount: null, selectedChat: null });
+          }
+        }
       } catch (e) {
         console.warn("[GlassesUI] Using demo data");
+        const demoChats = getDemoChats();
+        
         setState((s) => ({
           ...s,
-          chats: getDemoChats(),
+          chats: demoChats,
           isLoading: false,
         }));
+
+        // If we had a saved chat, try to restore it
+        if (savedState.selectedChat) {
+          const chatExists = demoChats.some((c) => c.id === savedState.selectedChat);
+          if (chatExists) {
+            loadMessages(savedState.selectedChat);
+          } else {
+            saveState({ selectedAccount: null, selectedChat: null });
+          }
+        }
       }
     }
     load();
@@ -617,6 +679,15 @@ export function GlassesUI({
     activateKeepAlive("even-messages");
     return () => deactivateKeepAlive();
   }, []);
+
+  // Persist state changes to localStorage
+  useEffect(() => {
+    saveState({
+      selectedAccount: state.selectedAccount,
+      selectedChat: state.selectedChat,
+      chatScrollPosition: state.messageScrollOffset,
+    });
+  }, [state.selectedAccount, state.selectedChat, state.messageScrollOffset]);
 
   // Handle selection
   const handleSelect = useCallback(
