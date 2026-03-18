@@ -895,26 +895,34 @@ export function GlassesUI({
           messages = result.messages.reverse();
         }
         const finalMessages = messages.length > 0 ? messages : getDemoMessages();
-        // Calculate scroll offset to show latest messages (at bottom)
-        const maxScroll = Math.max(0, finalMessages.length - 1);
+        
+        // Calculate scroll offset to fill the screen with messages
+        // Display has ~4 lines available for messages (7 total - header - separator - action)
+        // We want to show the latest message at the bottom, with as many above as fit
+        const LINES_FOR_MESSAGES = DISPLAY_LINES - 3; // 7 - 3 = 4 lines
+        const maxScroll = Math.max(0, finalMessages.length - LINES_FOR_MESSAGES);
+        // Clamp to valid range (0 to totalMessages - 1)
+        const initialScroll = Math.min(maxScroll, Math.max(0, finalMessages.length - 1));
         
         setState((s) => ({
           ...s,
           messages: finalMessages,
           isLoading: false,
           highlightedIndex: 0,
-          messageScrollOffset: maxScroll, // Start at bottom (latest messages)
+          messageScrollOffset: initialScroll,
         }));
       } catch {
         const demoMessages = getDemoMessages();
-        const maxScroll = Math.max(0, demoMessages.length - 1);
+        const LINES_FOR_MESSAGES = DISPLAY_LINES - 3;
+        const maxScroll = Math.max(0, demoMessages.length - LINES_FOR_MESSAGES);
+        const initialScroll = Math.min(maxScroll, Math.max(0, demoMessages.length - 1));
         
         setState((s) => ({
           ...s,
           messages: demoMessages,
           isLoading: false,
           highlightedIndex: 0,
-          messageScrollOffset: maxScroll, // Start at bottom
+          messageScrollOffset: initialScroll,
         }));
       }
     }
