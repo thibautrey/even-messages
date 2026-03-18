@@ -168,6 +168,38 @@ function truncateName(text: string, max: number): string {
   return result.slice(0, max);
 }
 
+// Calculate the max scroll position so that scrolling stops when "[more below]" disappears
+function getMaxScrollForMessages(messages: BeeperMessage[]): number {
+  if (messages.length === 0) return 0;
+  
+  const LINES_FOR_MESSAGES = DISPLAY_LINES - 3; // header, separator, action bar
+  const DISPLAY_W = DISPLAY_WIDTH;
+  
+  // Try different scroll positions and find the max one where all remaining messages fit
+  for (let scroll = Math.max(0, messages.length - 1); scroll >= 0; scroll--) {
+    let lineCount = 0;
+    let msgCount = 0;
+    
+    for (let i = scroll; i < messages.length && lineCount < LINES_FOR_MESSAGES; i++) {
+      const msg = messages[i];
+      const sender = msg.isSender ? ">" : truncateName(msg.senderName || "?", 8);
+      const prefix = `[00:00] ${sender}: `;
+      const content = stripUnsupportedChars(msg.text || "[media]");
+      const wrappedLines = wordWrap(content, DISPLAY_W - prefix.length);
+      
+      lineCount += wrappedLines.length;
+      msgCount++;
+    }
+    
+    // If adding the next message would overflow, this scroll is valid
+    if (lineCount <= LINES_FOR_MESSAGES) {
+      return scroll;
+    }
+  }
+  
+  return 0;
+}
+
 // Word-wrap text to fit within maxWidth, breaking words as needed
 function wordWrap(text: string, maxWidth: number): string[] {
   if (!text || text.length === 0) return [""];
@@ -948,18 +980,8 @@ export function GlassesUI({
           messages.length > 0 ? messages : getDemoMessages();
 
         // Calculate scroll offset to fill the screen with messages
-        // Display has ~4 lines available for messages (7 total - header - separator - action)
-        // We want to show the latest message at the bottom, with as many above as fit
-        const LINES_FOR_MESSAGES = DISPLAY_LINES - 3; // 7 - 3 = 4 lines
-        const maxScroll = Math.max(
-          0,
-          finalMessages.length - LINES_FOR_MESSAGES,
-        );
-        // Clamp to valid range (0 to totalMessages - 1)
-        const initialScroll = Math.min(
-          maxScroll,
-          Math.max(0, finalMessages.length - 1),
-        );
+        // Use getMaxScrollForMessages to find the max valid scroll position
+        const initialScroll = getMaxScrollForMessages(finalMessages);
 
         setState((s) => ({
           ...s,
@@ -970,12 +992,7 @@ export function GlassesUI({
         }));
       } catch {
         const demoMessages = getDemoMessages();
-        const LINES_FOR_MESSAGES = DISPLAY_LINES - 3;
-        const maxScroll = Math.max(0, demoMessages.length - LINES_FOR_MESSAGES);
-        const initialScroll = Math.min(
-          maxScroll,
-          Math.max(0, demoMessages.length - 1),
-        );
+        const initialScroll = getMaxScrollForMessages(demoMessages);
 
         setState((s) => ({
           ...s,
@@ -1057,11 +1074,12 @@ export function GlassesUI({
         case "HIGHLIGHT_MOVE": {
           // Handle scrolling in messages screen
           if (snapshot.currentScreen === "messages") {
-            const totalMessages = snapshot.messages.length;
-            if (totalMessages === 0) return nav;
+            const messages = snapshot.messages;
+            if (messages.length === 0) return nav;
             
-            const maxScroll = Math.max(0, totalMessages - 1);
             const currentScroll = snapshot.messageScrollOffset;
+            // Calculate max scroll based on actual display capacity
+            const maxScroll = getMaxScrollForMessages(messages);
             
             // Block scrolling beyond boundaries
             if (action.direction === "down" && currentScroll >= maxScroll) {
