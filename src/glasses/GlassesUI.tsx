@@ -32,8 +32,8 @@ import { useGlasses } from "even-toolkit/useGlasses";
 // Font: 22px Courier New monospace (~12px per char)
 // Visible width: ~48 chars, but leaving padding, use 40 chars
 const MAX_VISIBLE_ITEMS = 8; // Max items visible on screen
-const DISPLAY_WIDTH = 70; // Max characters per line
-const DISPLAY_LINES = 7; // Max lines on Even G2 display (288px / ~40px per line)
+const DISPLAY_WIDTH = 60; // Max characters per line
+const DISPLAY_LINES = 8; // Max lines on Even G2 display (288px / ~40px per line)
 const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 
 // LocalStorage key for persisting state
@@ -97,13 +97,13 @@ function stripUnsupportedChars(text: string): string {
   // Remove emoji (U+1F000 to U+1FFFF range)
   // Also remove other symbols like playing cards, misc symbols, dingbats beyond what we use
   return text
-    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '[emoji]')  // Misc symbols and emoji
-    .replace(/[\u{2600}-\u{26FF}]/gu, '')            // Misc symbols
-    .replace(/[\u{2700}-\u{27BF}]/gu, '')            // Dingbats
-    .replace(/[\u{1F000}-\u{1F02F}]/gu, '')          // Mahjong tiles
-    .replace(/[\u{1F0A0}-\u{1F0FF}]/gu, '')          // Playing cards
-    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')          // Transport and map symbols
-    .replace(/[\u{1F700}-\u{1F77F}]/gu, '');         // Alchemical symbols
+    .replace(/[\u{1F300}-\u{1F9FF}]/gu, "[emoji]") // Misc symbols and emoji
+    .replace(/[\u{2600}-\u{26FF}]/gu, "") // Misc symbols
+    .replace(/[\u{2700}-\u{27BF}]/gu, "") // Dingbats
+    .replace(/[\u{1F000}-\u{1F02F}]/gu, "") // Mahjong tiles
+    .replace(/[\u{1F0A0}-\u{1F0FF}]/gu, "") // Playing cards
+    .replace(/[\u{1F680}-\u{1F6FF}]/gu, "") // Transport and map symbols
+    .replace(/[\u{1F700}-\u{1F77F}]/gu, ""); // Alchemical symbols
 }
 
 // Helper: create a separator line (using meta style so text renders)
@@ -382,16 +382,21 @@ function buildMessagesDisplay(
 
   // Get messages to display, respecting line limit
   const visibleMessages: BeeperMessage[] = [];
-  const moreBelowIndices: { above: number; below: number } = { above: 0, below: 0 };
+  const moreBelowIndices: { above: number; below: number } = {
+    above: 0,
+    below: 0,
+  };
   let currentLineCount = 0;
 
   // Start from scroll position and go forward
-  for (let i = scrollOffset; i < totalMessages && currentLineCount < MAX_MESSAGE_LINES; i++) {
+  for (
+    let i = scrollOffset;
+    i < totalMessages && currentLineCount < MAX_MESSAGE_LINES;
+    i++
+  ) {
     const msg = state.messages[i];
     const time = formatTime(msg.timestamp);
-    const sender = msg.isSender
-      ? ">"
-      : truncateName(msg.senderName || "?", 8);
+    const sender = msg.isSender ? ">" : truncateName(msg.senderName || "?", 8);
     const prefix = `[${time}] ${sender}: `;
 
     // Strip unsupported characters and wrap message content
@@ -425,7 +430,7 @@ function buildMessagesDisplay(
       const content = stripUnsupportedChars(msg.text || "[media]");
       let wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
       // Filter out any empty lines
-      wrappedLines = wrappedLines.filter(line => line.length > 0);
+      wrappedLines = wrappedLines.filter((line) => line.length > 0);
 
       // Skip if no content
       if (wrappedLines.length === 0) return;
@@ -433,10 +438,10 @@ function buildMessagesDisplay(
       // First line with prefix
       lines.push(line(`${prefix}${wrappedLines[0]}`, "normal"));
 
-      // Continuation lines (indented)
+      // Continuation lines (at the beginning of the view)
       for (let i = 1; i < wrappedLines.length; i++) {
         if (wrappedLines[i]) {
-          lines.push(line(`             ${wrappedLines[i]}`, "normal"));
+          lines.push(line(wrappedLines[i], "normal"));
         }
       }
     });
@@ -671,7 +676,11 @@ export function GlassesUI({
     accounts: [],
     chats: [],
     messages: [],
-    currentScreen: savedState.selectedChat ? "messages" : savedState.selectedAccount ? "chats" : "accounts",
+    currentScreen: savedState.selectedChat
+      ? "messages"
+      : savedState.selectedAccount
+        ? "chats"
+        : "accounts",
     selectedAccount: savedState.selectedAccount,
     selectedChat: savedState.selectedChat,
     selectedMessageIndex: 0,
@@ -695,7 +704,7 @@ export function GlassesUI({
         }
 
         const initialChats = accounts.length === 0 ? getDemoChats() : [];
-        
+
         setState((s) => ({
           ...s,
           accounts,
@@ -705,7 +714,9 @@ export function GlassesUI({
 
         // If we had a saved chat, try to restore it
         if (savedState.selectedChat) {
-          const chatExists = initialChats.some((c) => c.id === savedState.selectedChat);
+          const chatExists = initialChats.some(
+            (c) => c.id === savedState.selectedChat,
+          );
           if (chatExists) {
             loadMessages(savedState.selectedChat);
           } else {
@@ -722,7 +733,7 @@ export function GlassesUI({
       } catch (e) {
         console.warn("[GlassesUI] Using demo data");
         const demoChats = getDemoChats();
-        
+
         setState((s) => ({
           ...s,
           chats: demoChats,
@@ -731,7 +742,9 @@ export function GlassesUI({
 
         // If we had a saved chat, try to restore it
         if (savedState.selectedChat) {
-          const chatExists = demoChats.some((c) => c.id === savedState.selectedChat);
+          const chatExists = demoChats.some(
+            (c) => c.id === savedState.selectedChat,
+          );
           if (chatExists) {
             loadMessages(savedState.selectedChat);
           } else {
@@ -894,16 +907,23 @@ export function GlassesUI({
           const result = await beeper.listMessages(chatId);
           messages = result.messages.reverse();
         }
-        const finalMessages = messages.length > 0 ? messages : getDemoMessages();
-        
+        const finalMessages =
+          messages.length > 0 ? messages : getDemoMessages();
+
         // Calculate scroll offset to fill the screen with messages
         // Display has ~4 lines available for messages (7 total - header - separator - action)
         // We want to show the latest message at the bottom, with as many above as fit
         const LINES_FOR_MESSAGES = DISPLAY_LINES - 3; // 7 - 3 = 4 lines
-        const maxScroll = Math.max(0, finalMessages.length - LINES_FOR_MESSAGES);
+        const maxScroll = Math.max(
+          0,
+          finalMessages.length - LINES_FOR_MESSAGES,
+        );
         // Clamp to valid range (0 to totalMessages - 1)
-        const initialScroll = Math.min(maxScroll, Math.max(0, finalMessages.length - 1));
-        
+        const initialScroll = Math.min(
+          maxScroll,
+          Math.max(0, finalMessages.length - 1),
+        );
+
         setState((s) => ({
           ...s,
           messages: finalMessages,
@@ -915,8 +935,11 @@ export function GlassesUI({
         const demoMessages = getDemoMessages();
         const LINES_FOR_MESSAGES = DISPLAY_LINES - 3;
         const maxScroll = Math.max(0, demoMessages.length - LINES_FOR_MESSAGES);
-        const initialScroll = Math.min(maxScroll, Math.max(0, demoMessages.length - 1));
-        
+        const initialScroll = Math.min(
+          maxScroll,
+          Math.max(0, demoMessages.length - 1),
+        );
+
         setState((s) => ({
           ...s,
           messages: demoMessages,
