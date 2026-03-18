@@ -30,15 +30,15 @@ import { useGlasses } from "even-toolkit/useGlasses";
 
 // Even G2: 576px wide, ~288px tall
 const MAX_VISIBLE_ITEMS = 6; // Max items visible on screen
-const SEPARATOR_LINE = "-----------"; // 36 dashes for display width
+const SEPARATOR_LINE = "----"; // 36 dashes for display width
 
 // ASCII indicators (safe for glasses font)
 const ICONS = {
   SELECTED: ">",
   BACK: "<",
-  DIRECT: "[D]",
-  GROUP: "[G]",
-  UNREAD: "[!",
+  DIRECT: "[Direct]",
+  GROUP: "[Group]",
+  UNREAD: "[Unread]",
 };
 
 // Quick reply presets (2 columns x 4 rows = 8 replies)
@@ -53,9 +53,9 @@ const QUICK_REPLIES = [
   "Later",
 ];
 
-// Helper: create a separator line (uses dashes instead of Unicode)
+// Helper: create a separator line (using meta style so text renders)
 function sep(): DisplayLine {
-  return line(SEPARATOR_LINE, "separator");
+  return line(SEPARATOR_LINE, 'meta');
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -767,8 +767,6 @@ export function GlassesUI({
           return nav;
         }
       }
-
-      return nav;
     },
     [handleSelect, handleBack],
   );
