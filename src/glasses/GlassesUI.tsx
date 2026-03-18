@@ -648,8 +648,14 @@ export function GlassesUI({
           if (chatExists) {
             loadMessages(savedState.selectedChat);
           } else {
-            // Chat no longer exists, clear saved state
+            // Chat no longer exists, go back to chats list
             saveState({ selectedAccount: null, selectedChat: null });
+            setState((s) => ({
+              ...s,
+              currentScreen: savedState.selectedAccount ? "chats" : "accounts",
+              selectedAccount: savedState.selectedAccount,
+              selectedChat: null,
+            }));
           }
         }
       } catch (e) {
@@ -668,7 +674,14 @@ export function GlassesUI({
           if (chatExists) {
             loadMessages(savedState.selectedChat);
           } else {
+            // Chat no longer exists, go back to chats list
             saveState({ selectedAccount: null, selectedChat: null });
+            setState((s) => ({
+              ...s,
+              currentScreen: savedState.selectedAccount ? "chats" : "accounts",
+              selectedAccount: savedState.selectedAccount,
+              selectedChat: null,
+            }));
           }
         }
       }
