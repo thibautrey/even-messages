@@ -31,8 +31,8 @@ import { useGlasses } from "even-toolkit/useGlasses";
 // Even G2: 576px wide, ~288px tall
 // Font: 22px Courier New monospace (~12px per char)
 // Visible width: ~48 chars, but leaving padding, use 40 chars
-const MAX_VISIBLE_ITEMS = 6; // Max items visible on screen
-const DISPLAY_WIDTH = 40; // Max characters per line
+const MAX_VISIBLE_ITEMS = 8; // Max items visible on screen
+const DISPLAY_WIDTH = 70; // Max characters per line
 const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 
 // ASCII indicators (safe for glasses font)
@@ -58,7 +58,7 @@ const QUICK_REPLIES = [
 
 // Helper: create a separator line (using meta style so text renders)
 function sep(): DisplayLine {
-  return line(SEPARATOR_LINE, 'meta');
+  return line(SEPARATOR_LINE, "meta");
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -95,14 +95,31 @@ function truncate(text: string, max: number): string {
   return text.slice(0, max - 2) + "..";
 }
 
+// Truncate name: show first word + first letter of second word (if any)
+function truncateName(text: string, max: number): string {
+  if (text.length <= max) return text;
+
+  const words = text.split(" ");
+  if (words.length === 1) {
+    return words[0].slice(0, max);
+  }
+
+  // First word + first letter of second word
+  const first = words[0];
+  const second = words[1] ? words[1][0] : "";
+  const result = `${first} ${second}`.trim();
+
+  return result.slice(0, max);
+}
+
 // Word-wrap text to fit within maxWidth, breaking at word boundaries
 function wordWrap(text: string, maxWidth: number): string[] {
   if (text.length <= maxWidth) return [text];
-  
+
   const words = text.split(" ");
   const lines: string[] = [];
   let currentLine = "";
-  
+
   for (const word of words) {
     // If single word is longer than maxWidth, break it
     if (word.length > maxWidth) {
@@ -116,7 +133,7 @@ function wordWrap(text: string, maxWidth: number): string[] {
       }
       continue;
     }
-    
+
     // Check if adding this word would exceed maxWidth
     const testLine = currentLine ? currentLine + " " + word : word;
     if (testLine.length > maxWidth) {
@@ -128,11 +145,11 @@ function wordWrap(text: string, maxWidth: number): string[] {
       currentLine = testLine;
     }
   }
-  
+
   if (currentLine) {
     lines.push(currentLine.trim());
   }
-  
+
   return lines.length > 0 ? lines : [text];
 }
 
@@ -209,7 +226,7 @@ function buildAccountsDisplay(
       const name = a.user.fullName || a.user.username || "Unknown";
 
       // Full width line
-      const lineText = `${isSelected ? ICONS.SELECTED : " "} ${icon} ${padRight(truncate(name, 28), 28)}`;
+      const lineText = `${isSelected ? ICONS.SELECTED : " "} ${icon} ${padRight(truncateName(name, 28), 28)}`;
       lines.push(line(lineText, isSelected ? "inverted" : "normal"));
       itemIdx++;
     }
@@ -256,7 +273,7 @@ function buildChatsDisplay(
       const typeIcon = chat.type === "group" ? ICONS.GROUP : ICONS.DIRECT;
 
       // Format: > [D] Contact Name..............[!2]
-      const name = truncate(chat.title, 26);
+      const name = truncateName(chat.title, 26);
       const namePadded = padRight(name, 26);
       const suffix =
         chat.unreadCount > 0 ? `${ICONS.UNREAD}${chat.unreadCount}]` : "";
@@ -285,7 +302,7 @@ function buildMessagesDisplay(
 
   // Header with back + chat name
   const chat = state.chats.find((c) => c.id === state.selectedChat);
-  const chatName = chat ? truncate(chat.title, 20) : "Messages";
+  const chatName = chat ? truncateName(chat.title, 20) : "Messages";
   lines.push(
     line(buildHeaderLine(`${ICONS.BACK} ${chatName}`, ""), "inverted"),
   );
@@ -298,7 +315,7 @@ function buildMessagesDisplay(
   } else {
     visibleMessages.forEach((msg) => {
       const time = formatTime(msg.timestamp);
-      const sender = msg.isSender ? ">" : truncate(msg.senderName || "?", 8);
+      const sender = msg.isSender ? ">" : truncateName(msg.senderName || "?", 8);
       const prefix = `[${time}] ${sender}: `;
 
       // Wrap message content at word boundaries
@@ -337,7 +354,7 @@ function buildQuickReplyDisplay(
 
   // Header
   const msg = state.messages[state.selectedMessageIndex];
-  const sender = msg ? truncate(msg.senderName || "Unknown", 16) : "Unknown";
+  const sender = msg ? truncateName(msg.senderName || "Unknown", 16) : "Unknown";
   lines.push(line(buildHeaderLine(`Reply: ${sender}`, ""), "inverted"));
 
   // Quick replies in 2 columns
