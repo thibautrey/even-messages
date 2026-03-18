@@ -810,12 +810,9 @@ export function GlassesUI({
         }
 
         case "messages": {
-          const firstIncoming = s.messages.find((m) => !m.isSender);
-          if (firstIncoming) {
-            updates.currentScreen = "quickReply";
-            updates.selectedMessageIndex = s.messages.indexOf(firstIncoming);
-            updates.highlightedIndex = 0;
-          }
+          // Always go to quick reply - scroll position doesn't matter
+          updates.currentScreen = "quickReply";
+          updates.highlightedIndex = 0;
           break;
         }
 
