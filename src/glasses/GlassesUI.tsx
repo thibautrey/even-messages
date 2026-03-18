@@ -758,7 +758,7 @@ export function GlassesUI({
             updates.selectedChat = chat.id;
             updates.isLoading = true;
             updates.selectedMessageIndex = 0;
-            updates.messageScrollOffset = 0; // Reset scroll, show latest messages
+            // messageScrollOffset will be set to max (bottom) in loadMessages
 
             loadMessages(chat.id);
           }
@@ -851,18 +851,27 @@ export function GlassesUI({
           const result = await beeper.listMessages(chatId);
           messages = result.messages.reverse();
         }
+        const finalMessages = messages.length > 0 ? messages : getDemoMessages();
+        // Calculate scroll offset to show latest messages (at bottom)
+        const maxScroll = Math.max(0, finalMessages.length - VISIBLE_MESSAGES);
+        
         setState((s) => ({
           ...s,
-          messages: messages.length > 0 ? messages : getDemoMessages(),
+          messages: finalMessages,
           isLoading: false,
           highlightedIndex: 0,
+          messageScrollOffset: maxScroll, // Start at bottom (latest messages)
         }));
       } catch {
+        const demoMessages = getDemoMessages();
+        const maxScroll = Math.max(0, demoMessages.length - VISIBLE_MESSAGES);
+        
         setState((s) => ({
           ...s,
-          messages: getDemoMessages(),
+          messages: demoMessages,
           isLoading: false,
           highlightedIndex: 0,
+          messageScrollOffset: maxScroll, // Start at bottom
         }));
       }
     }
