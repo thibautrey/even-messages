@@ -92,6 +92,47 @@ function truncate(text: string, max: number): string {
   return text.slice(0, max - 2) + "..";
 }
 
+// Word-wrap text to fit within maxWidth, breaking at word boundaries
+function wordWrap(text: string, maxWidth: number): string[] {
+  if (text.length <= maxWidth) return [text];
+  
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let currentLine = "";
+  
+  for (const word of words) {
+    // If single word is longer than maxWidth, break it
+    if (word.length > maxWidth) {
+      if (currentLine) {
+        lines.push(currentLine.trim());
+        currentLine = "";
+      }
+      // Break long word into chunks
+      for (let i = 0; i < word.length; i += maxWidth - 1) {
+        lines.push(word.slice(i, i + maxWidth - 1) + "-");
+      }
+      continue;
+    }
+    
+    // Check if adding this word would exceed maxWidth
+    const testLine = currentLine ? currentLine + " " + word : word;
+    if (testLine.length > maxWidth) {
+      if (currentLine) {
+        lines.push(currentLine.trim());
+      }
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  }
+  
+  if (currentLine) {
+    lines.push(currentLine.trim());
+  }
+  
+  return lines.length > 0 ? lines : [text];
+}
+
 function formatTime(timestamp: string): string {
   return new Date(timestamp)
     .toLocaleTimeString([], {
@@ -255,11 +296,19 @@ function buildMessagesDisplay(
     visibleMessages.forEach((msg) => {
       const time = formatTime(msg.timestamp);
       const sender = msg.isSender ? ">" : truncate(msg.senderName || "?", 8);
+      const prefix = `[${time}] ${sender}: `;
 
-      // Format: [10:30] John: Hello world message...
-      const content = truncate(msg.text || "[media]", 22);
-      const lineText = `[${time}] ${sender}: ${content}`;
-      lines.push(line(lineText, "normal"));
+      // Wrap message content at word boundaries
+      const content = msg.text || "[media]";
+      const wrappedLines = wordWrap(content, 36 - prefix.length);
+
+      // First line with prefix
+      lines.push(line(`${prefix}${wrappedLines[0]}`, "normal"));
+
+      // Continuation lines (indented)
+      for (let i = 1; i < wrappedLines.length; i++) {
+        lines.push(line(`             ${wrappedLines[i]}`, "normal"));
+      }
     });
   }
 
