@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Even Messages</title>
+    <style>
+      /* Minimal styling for development - glasses will handle actual display */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        background: #0a0a0a;
+        color: #fff;
+        min-height: 100vh;
+      }
+      
+      #root {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      
+      .dev-mode {
+        text-align: center;
+        padding: 40px;
+        background: #141414;
+        border-radius: 12px;
+        max-width: 500px;
+      }
+      
+      .dev-mode h1 {
+        font-size: 24px;
+        margin-bottom: 16px;
+        color: #3b82f6;
+      }
+      
+      .dev-mode p {
+        color: #888;
+        margin-bottom: 12px;
+        line-height: 1.5;
+      }
+      
+      .dev-mode .status {
+        margin-top: 20px;
+        padding: 12px;
+        background: #1e1e1e;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      
+      .dev-mode .success {
+        color: #22c55e;
+      }
+      
+      .dev-mode .error {
+        color: #ef4444;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
