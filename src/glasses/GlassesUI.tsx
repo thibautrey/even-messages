@@ -163,28 +163,30 @@ function truncateName(text: string, max: number): string {
   return result.slice(0, max);
 }
 
-// Word-wrap text to fit within maxWidth, breaking at word boundaries
+// Word-wrap text to fit within maxWidth, breaking words as needed
 function wordWrap(text: string, maxWidth: number): string[] {
   if (!text || text.length === 0) return [""];
   if (text.length <= maxWidth) return [text];
 
-  const words = text.split(" ");
   const lines: string[] = [];
   let currentLine = "";
 
-  for (const word of words) {
-    if (!word) continue; // Skip empty words
-    
-    // If single word is longer than maxWidth, break it
+  for (const word of text.split(" ")) {
+    if (!word) continue;
+
+    // If single word is longer than maxWidth, break it mid-word
     if (word.length > maxWidth) {
       if (currentLine) {
-        lines.push(currentLine.trim());
+        lines.push(currentLine);
         currentLine = "";
       }
-      // Break long word into chunks
-      for (let i = 0; i < word.length; i += maxWidth - 1) {
-        lines.push(word.slice(i, i + maxWidth - 1) + "-");
+      // Break long word into chunks (no hyphen, just clean break)
+      let remaining = word;
+      while (remaining.length > maxWidth) {
+        lines.push(remaining.slice(0, maxWidth));
+        remaining = remaining.slice(maxWidth);
       }
+      currentLine = remaining;
       continue;
     }
 
@@ -192,7 +194,7 @@ function wordWrap(text: string, maxWidth: number): string[] {
     const testLine = currentLine ? currentLine + " " + word : word;
     if (testLine.length > maxWidth) {
       if (currentLine) {
-        lines.push(currentLine.trim());
+        lines.push(currentLine);
       }
       currentLine = word;
     } else {
@@ -200,8 +202,8 @@ function wordWrap(text: string, maxWidth: number): string[] {
     }
   }
 
-  if (currentLine.trim()) {
-    lines.push(currentLine.trim());
+  if (currentLine) {
+    lines.push(currentLine);
   }
 
   return lines.length > 0 ? lines : [text];
