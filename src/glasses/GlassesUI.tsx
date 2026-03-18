@@ -91,6 +91,21 @@ function saveState(state: SavedState): void {
   }
 }
 
+// Strip emoji and other unsupported Unicode characters for glasses display
+// Glasses only support basic Latin, numbers, punctuation, and common symbols
+function stripUnsupportedChars(text: string): string {
+  // Remove emoji (U+1F000 to U+1FFFF range)
+  // Also remove other symbols like playing cards, misc symbols, dingbats beyond what we use
+  return text
+    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '[emoji]')  // Misc symbols and emoji
+    .replace(/[\u{2600}-\u{26FF}]/gu, '')            // Misc symbols
+    .replace(/[\u{2700}-\u{27BF}]/gu, '')            // Dingbats
+    .replace(/[\u{1F000}-\u{1F02F}]/gu, '')          // Mahjong tiles
+    .replace(/[\u{1F0A0}-\u{1F0FF}]/gu, '')          // Playing cards
+    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')          // Transport and map symbols
+    .replace(/[\u{1F700}-\u{1F77F}]/gu, '');         // Alchemical symbols
+}
+
 // Helper: create a separator line (using meta style so text renders)
 function sep(): DisplayLine {
   return line(SEPARATOR_LINE, "meta");
@@ -369,8 +384,8 @@ function buildMessagesDisplay(
         : truncateName(msg.senderName || "?", 8);
       const prefix = `[${time}] ${sender}: `;
 
-      // Wrap message content at word boundaries
-      const content = msg.text || "[media]";
+      // Strip unsupported characters (emoji, etc) and wrap message content
+      const content = stripUnsupportedChars(msg.text || "[media]");
       const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
 
       // First line with prefix
