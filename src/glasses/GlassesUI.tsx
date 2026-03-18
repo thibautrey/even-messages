@@ -29,8 +29,11 @@ import { useGlasses } from "even-toolkit/useGlasses";
 // ═══════════════════════════════════════════════════════════════
 
 // Even G2: 576px wide, ~288px tall
+// Font: 22px Courier New monospace (~12px per char)
+// Visible width: ~48 chars, but leaving padding, use 40 chars
 const MAX_VISIBLE_ITEMS = 6; // Max items visible on screen
-const SEPARATOR_LINE = "----"; // 36 dashes for display width
+const DISPLAY_WIDTH = 40; // Max characters per line
+const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 
 // ASCII indicators (safe for glasses font)
 const ICONS = {
@@ -300,7 +303,7 @@ function buildMessagesDisplay(
 
       // Wrap message content at word boundaries
       const content = msg.text || "[media]";
-      const wrappedLines = wordWrap(content, 36 - prefix.length);
+      const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
 
       // First line with prefix
       lines.push(line(`${prefix}${wrappedLines[0]}`, "normal"));
