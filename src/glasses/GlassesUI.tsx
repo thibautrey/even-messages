@@ -1,8 +1,8 @@
 /**
  * Even Messages - Glasses UI Component
  * 
- * Uses even-toolkit useGlasses hook for proper React integration.
- * Handles: Up/Down (navigation), Click (select), Double-click (back).
+ * Optimized for Even G2 display: 576x288 pixels
+ * Uses full width for maximum readability.
  */
 
 import { useState, useCallback, useEffect } from 'react'
@@ -19,19 +19,20 @@ import { BeeperClient, BeeperAccount, BeeperChat, BeeperMessage } from '../servi
 // DISPLAY CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 
-const MAX_LINES = 5      // Max visible lines on glasses
+// Even G2: 576px wide, ~288px tall
+// Each line is ~40px tall, so we can fit ~7 lines + header
+const MAX_VISIBLE_ITEMS = 6   // Max items visible on screen
 
 // ASCII indicators (safe for glasses font)
 const ICONS = {
   SELECTED: '>',
   BACK: '<',
-  ACTION: '*',
   DIRECT: '[D]',
   GROUP: '[G]',
   UNREAD: '[!',
 }
 
-// Quick reply presets
+// Quick reply presets (2 columns x 4 rows = 8 replies)
 const QUICK_REPLIES = [
   'Got it', 'OK', 'Thanks!', 'See you',
   'On way', 'Call me', 'Busy', 'Later'
@@ -59,6 +60,13 @@ interface AppState {
 // UTILITY FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
+// Glasses display is ~40 chars wide at default font
+
+function padRight(text: string, len: number): string {
+  while (text.length < len) text += ' '
+  return text.slice(0, len)
+}
+
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text
   return text.slice(0, max - 2) + '..'
@@ -85,16 +93,15 @@ function getServiceIcon(accountId: string): string {
 function getMaxIndex(state: AppState): number {
   switch (state.currentScreen) {
     case 'accounts': {
-      // All Chats + unique accounts
       const uniqueAccounts = new Set(state.accounts.map(a => a.accountID))
-      return Math.max(0, uniqueAccounts.size)
+      return Math.max(0, uniqueAccounts.size) // +1 for "All Chats" at index 0
     }
     case 'chats':
       return Math.max(0, state.chats.length)
     case 'messages':
-      return Math.max(0, Math.min(state.messages.length - 1, MAX_LINES - 1))
+      return Math.max(0, state.messages.length - 1)
     case 'quickReply':
-      return Math.max(0, QUICK_REPLIES.length) // +1 for Cancel
+      return QUICK_REPLIES.length // +1 for Cancel
   }
 }
 
@@ -102,80 +109,82 @@ function getMaxIndex(state: AppState): number {
 // DISPLAY BUILDERS
 // ═══════════════════════════════════════════════════════════════
 
-function buildAccountsDisplay(state: AppState, highlightedIdx: number, _flashPhase: boolean): DisplayLine[] {
+function buildAccountsDisplay(state: AppState, highlightedIdx: number): DisplayLine[] {
   const lines: DisplayLine[] = []
   
-  // Header with time
+  // Header: "Even Messages" + time
   const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  lines.push(line(buildHeaderLine('Even Msg', time), 'inverted'))
+  lines.push(line(buildHeaderLine('Even Messages', time), 'inverted'))
   
   // "All Chats" option
   const allSelected = highlightedIdx === 0
   lines.push(line(
-    `${allSelected ? ICONS.SELECTED : ' '} ${ICONS.ACTION} All Chats`,
+    `${allSelected ? ICONS.SELECTED : ' '} * All Chats`,
     allSelected ? 'inverted' : 'normal'
   ))
   
   // Unique accounts
   const seen = new Set<string>()
   let itemIdx = 1 // Start at 1 since 0 is "All Chats"
+  
   state.accounts.forEach(a => {
     if (!seen.has(a.accountID)) {
       seen.add(a.accountID)
       const isSelected = highlightedIdx === itemIdx
       const icon = getServiceIcon(a.accountID)
       const name = a.user.fullName || a.user.username || 'Unknown'
-      lines.push(line(
-        `${isSelected ? ICONS.SELECTED : ' '} ${icon} ${truncate(name, 22)}`,
-        isSelected ? 'inverted' : 'normal'
-      ))
+      
+      // Full width line
+      const lineText = `${isSelected ? ICONS.SELECTED : ' '} ${icon} ${padRight(truncate(name, 28), 28)}`
+      lines.push(line(lineText, isSelected ? 'inverted' : 'normal'))
       itemIdx++
     }
   })
   
   lines.push(separator())
-  lines.push(line(buildStaticActionBar(['Select'], highlightedIdx >= itemIdx ? 0 : -1), 'meta'))
+  lines.push(line(buildStaticActionBar(['Select'], -1), 'meta'))
   
   return lines
 }
 
-function buildChatsDisplay(state: AppState, highlightedIdx: number, _flashPhase: boolean): DisplayLine[] {
+function buildChatsDisplay(state: AppState, highlightedIdx: number): DisplayLine[] {
   const lines: DisplayLine[] = []
   
-  // Header with back and count
+  // Header with back + account name + count
   const accountName = state.selectedAccount
     ? state.accounts.find(a => a.accountID === state.selectedAccount)?.user.fullName || 'Chats'
-    : 'All Chats'
-  lines.push(line(buildHeaderLine(`${ICONS.BACK} ${truncate(accountName, 10)}`, `${state.chats.length}`), 'inverted'))
+    : 'All Platforms'
+  lines.push(line(buildHeaderLine(`${ICONS.BACK} ${truncate(accountName, 20)}`, `${state.chats.length}`), 'inverted'))
   
   if (state.chats.length === 0) {
     lines.push(line('No chats found', 'normal'))
   } else {
-    // Show visible chats with wrap-around
-    const start = Math.max(0, highlightedIdx - 1)
-    const visible = state.chats.slice(start, start + MAX_LINES - 1)
+    // Calculate visible window
+    let start = Math.max(0, highlightedIdx - 1)
+    const maxItems = MAX_VISIBLE_ITEMS - 2 // Leave room for header and action bar
+    const visible = state.chats.slice(start, start + maxItems)
     
-    visible.forEach(chat => {
-      const isSelected = state.chats.indexOf(chat) === highlightedIdx
+    visible.forEach((chat, _i) => {
+      const globalIdx = start + visible.indexOf(chat)
+      const isSelected = globalIdx === highlightedIdx
       const typeIcon = chat.type === 'group' ? ICONS.GROUP : ICONS.DIRECT
-      const name = truncate(chat.title, 18)
       
-      let suffix = ''
-      if (chat.unreadCount > 0) {
-        suffix = ` ${ICONS.UNREAD}${chat.unreadCount}]`
-      }
+      // Format: > [D] Contact Name..............[!2]
+      const name = truncate(chat.title, 26)
+      const namePadded = padRight(name, 26)
+      const suffix = chat.unreadCount > 0 ? `${ICONS.UNREAD}${chat.unreadCount}]` : ''
+      const suffixPadded = padRight(suffix, 6)
       
-      lines.push(line(
-        `${isSelected ? ICONS.SELECTED : ' '} ${typeIcon} ${name}${suffix}`,
-        isSelected ? 'inverted' : 'normal'
-      ))
+      const lineText = `${isSelected ? ICONS.SELECTED : ' '} ${typeIcon} ${namePadded}${suffixPadded}`
+      lines.push(line(lineText, isSelected ? 'inverted' : 'normal'))
     })
   }
   
   lines.push(separator())
-  // Highlight back if on last item (Quick Reply option)
-  const backSelected = highlightedIdx >= state.chats.length
-  lines.push(line(buildStaticActionBar(['Back'], backSelected ? 0 : -1), 'meta'))
+  
+  // Show current position in list
+  const posText = `${highlightedIdx + 1}/${state.chats.length}`
+  lines.push(line(buildStaticActionBar(['Back'], -1) + '  ' + posText, 'meta'))
   
   return lines
 }
@@ -183,32 +192,31 @@ function buildChatsDisplay(state: AppState, highlightedIdx: number, _flashPhase:
 function buildMessagesDisplay(state: AppState, _highlightedIdx: number, flashPhase: boolean): DisplayLine[] {
   const lines: DisplayLine[] = []
   
-  // Header with back
+  // Header with back + chat name
   const chat = state.chats.find(c => c.id === state.selectedChat)
-  const chatName = chat ? truncate(chat.title, 14) : 'Messages'
+  const chatName = chat ? truncate(chat.title, 20) : 'Messages'
   lines.push(line(buildHeaderLine(`${ICONS.BACK} ${chatName}`, ''), 'inverted'))
   
-  // Messages (show last N)
-  const visibleMessages = state.messages.slice(-(MAX_LINES - 2))
+  // Messages - show last 5
+  const visibleMessages = state.messages.slice(-5)
   
   if (visibleMessages.length === 0) {
-    lines.push(line('No messages yet', 'normal'))
+    lines.push(line('No messages yet - send one!', 'normal'))
   } else {
     visibleMessages.forEach(msg => {
       const time = formatTime(msg.timestamp)
-      const sender = msg.isSender ? '>' : truncate(msg.senderName || '?', 6)
-      const content = truncate(msg.text || '[media]', 18)
+      const sender = msg.isSender ? '>' : truncate(msg.senderName || '?', 8)
       
-      lines.push(line(
-        `[${time}] ${sender}: ${content}`,
-        'normal'
-      ))
+      // Format: [10:30] John: Hello world message...
+      const content = truncate(msg.text || '[media]', 22)
+      const lineText = `[${time}] ${sender}: ${content}`
+      lines.push(line(lineText, 'normal'))
     })
   }
   
   lines.push(separator())
   
-  // Reply action
+  // Reply action (blinking)
   const hasIncoming = visibleMessages.some(m => !m.isSender)
   if (hasIncoming) {
     const actionBar = buildActionBar(['Reply'], 0, 'Reply', flashPhase)
@@ -220,17 +228,18 @@ function buildMessagesDisplay(state: AppState, _highlightedIdx: number, flashPha
   return lines
 }
 
-function buildQuickReplyDisplay(state: AppState, highlightedIdx: number, _flashPhase: boolean): DisplayLine[] {
+function buildQuickReplyDisplay(state: AppState, highlightedIdx: number): DisplayLine[] {
   const lines: DisplayLine[] = []
   
   // Header
   const msg = state.messages[state.selectedMessageIndex]
-  const sender = msg ? truncate(msg.senderName || 'Unknown', 14) : 'Unknown'
-  lines.push(line(buildHeaderLine(`Reply to ${sender}`, ''), 'inverted'))
+  const sender = msg ? truncate(msg.senderName || 'Unknown', 16) : 'Unknown'
+  lines.push(line(buildHeaderLine(`Reply: ${sender}`, ''), 'inverted'))
   
-  // Quick replies in 2 columns (2 per row)
+  // Quick replies in 2 columns
+  // Format: "Got it"    "OK"
   const start = Math.floor(highlightedIdx / 2) * 2
-  const visibleReplies = QUICK_REPLIES.slice(start, start + 4)
+  const visibleReplies = QUICK_REPLIES.slice(start, start + 6)
   
   for (let i = 0; i < visibleReplies.length; i += 2) {
     const reply1 = visibleReplies[i] || ''
@@ -240,17 +249,18 @@ function buildQuickReplyDisplay(state: AppState, highlightedIdx: number, _flashP
     const isSel1 = idx1 === highlightedIdx
     const isSel2 = idx2 === highlightedIdx
     
-    lines.push(line(
-      `${isSel1 ? ICONS.SELECTED : ' '}"${truncate(reply1, 10)}"  ${isSel2 ? ICONS.SELECTED : ' '}"${truncate(reply2, 10)}"`,
-      'normal'
-    ))
+    const sel1 = isSel1 ? ICONS.SELECTED : ' '
+    const sel2 = isSel2 ? ICONS.SELECTED : ' '
+    const lineText = `${sel1}"${padRight(reply1, 12)}"  ${sel2}"${padRight(reply2, 12)}"`
+    lines.push(line(lineText, 'normal'))
   }
   
   lines.push(separator())
   
-  // Cancel or confirm based on highlighted
+  // Cancel
   const isCancelSelected = highlightedIdx >= QUICK_REPLIES.length
-  lines.push(line(buildStaticActionBar(['Cancel'], isCancelSelected ? 0 : -1), 'meta'))
+  const cancelBar = buildStaticActionBar(['Cancel'], isCancelSelected ? 0 : -1)
+  lines.push(line(cancelBar, 'meta'))
   
   return lines
 }
@@ -266,6 +276,8 @@ function getDemoChats(): BeeperChat[] {
     { id: '3', accountID: 'whatsapp', title: 'Family Group', type: 'group', participants: { items: [], hasMore: false, total: 8 }, lastActivity: new Date().toISOString(), unreadCount: 5, isArchived: false, isMuted: false, isPinned: true },
     { id: '4', accountID: 'signal', title: 'Work Team', type: 'group', participants: { items: [], hasMore: false, total: 12 }, lastActivity: new Date().toISOString(), unreadCount: 1, isArchived: false, isMuted: false, isPinned: false },
     { id: '5', accountID: 'telegram', title: 'Bob Wilson', type: 'single', participants: { items: [], hasMore: false, total: 2 }, lastActivity: new Date().toISOString(), unreadCount: 0, isArchived: false, isMuted: false, isPinned: false },
+    { id: '6', accountID: 'whatsapp', title: 'Mom', type: 'single', participants: { items: [], hasMore: false, total: 2 }, lastActivity: new Date().toISOString(), unreadCount: 1, isArchived: false, isMuted: false, isPinned: false },
+    { id: '7', accountID: 'signal', title: 'Best Friend', type: 'single', participants: { items: [], hasMore: false, total: 2 }, lastActivity: new Date().toISOString(), unreadCount: 3, isArchived: false, isMuted: false, isPinned: false },
   ]
 }
 
@@ -373,16 +385,11 @@ export function GlassesUI({ beeperConfig }: { beeperConfig: { baseUrl: string; t
           updates.selectedMessageIndex = 0
           
           loadMessages(chat.id)
-        } else {
-          // Quick Reply - go back to messages (need at least one message)
-          updates.currentScreen = 'messages'
-          updates.highlightedIndex = 0
         }
         break
       }
       
       case 'messages': {
-        // Just show reply screen
         const firstIncoming = s.messages.find(m => !m.isSender)
         if (firstIncoming) {
           updates.currentScreen = 'quickReply'
@@ -496,16 +503,16 @@ export function GlassesUI({ beeperConfig }: { beeperConfig: { baseUrl: string; t
     
     switch (snapshot.currentScreen) {
       case 'accounts':
-        lines = buildAccountsDisplay(snapshot, nav.highlightedIndex, flashPhase)
+        lines = buildAccountsDisplay(snapshot, nav.highlightedIndex)
         break
       case 'chats':
-        lines = buildChatsDisplay(snapshot, nav.highlightedIndex, flashPhase)
+        lines = buildChatsDisplay(snapshot, nav.highlightedIndex)
         break
       case 'messages':
         lines = buildMessagesDisplay(snapshot, nav.highlightedIndex, flashPhase)
         break
       case 'quickReply':
-        lines = buildQuickReplyDisplay(snapshot, nav.highlightedIndex, flashPhase)
+        lines = buildQuickReplyDisplay(snapshot, nav.highlightedIndex)
         break
       default:
         lines = [line('Even Messages', 'inverted')]
@@ -521,12 +528,10 @@ export function GlassesUI({ beeperConfig }: { beeperConfig: { baseUrl: string; t
   
   // Handle glass actions
   const onGlassAction = useCallback((action: GlassAction, nav: GlassNavState, snapshot: AppState): GlassNavState => {
-    const newHighlightedIndex = nav.highlightedIndex
-    
     switch (action.type) {
       case 'HIGHLIGHT_MOVE': {
         const maxIdx = getMaxIndex(snapshot)
-        const newIdx = Math.max(0, Math.min(maxIdx, newHighlightedIndex + (action.direction === 'down' ? 1 : -1)))
+        const newIdx = Math.max(0, Math.min(maxIdx, nav.highlightedIndex + (action.direction === 'down' ? 1 : -1)))
         return { ...nav, highlightedIndex: newIdx }
       }
       
