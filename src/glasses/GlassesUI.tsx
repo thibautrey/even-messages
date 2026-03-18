@@ -1058,18 +1058,21 @@ export function GlassesUI({
           // Handle scrolling in messages screen
           if (snapshot.currentScreen === "messages") {
             const totalMessages = snapshot.messages.length;
+            if (totalMessages === 0) return nav;
+            
             const maxScroll = Math.max(0, totalMessages - 1);
-            const newScroll = Math.max(
-              0,
-              Math.min(
-                maxScroll,
-                snapshot.messageScrollOffset +
-                  (action.direction === "down" ? 1 : -1),
-              ),
-            );
-            if (newScroll !== snapshot.messageScrollOffset) {
-              setState((s) => ({ ...s, messageScrollOffset: newScroll }));
+            const currentScroll = snapshot.messageScrollOffset;
+            
+            // Block scrolling beyond boundaries
+            if (action.direction === "down" && currentScroll >= maxScroll) {
+              return nav; // Already at bottom, do nothing
             }
+            if (action.direction === "up" && currentScroll <= 0) {
+              return nav; // Already at top, do nothing
+            }
+            
+            const newScroll = currentScroll + (action.direction === "down" ? 1 : -1);
+            setState((s) => ({ ...s, messageScrollOffset: newScroll }));
             return nav;
           }
 
