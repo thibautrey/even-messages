@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useGlasses } from 'even-toolkit/useGlasses'
 import { GlassAction, GlassNavState, DisplayLine } from 'even-toolkit/types'
-import { line, separator } from 'even-toolkit/types'
+import { line } from 'even-toolkit/types'
 import { buildHeaderLine } from 'even-toolkit/text-utils'
 import { buildActionBar, buildStaticActionBar } from 'even-toolkit/action-bar'
 import { useFlashPhase } from 'even-toolkit/useFlashPhase'
@@ -20,8 +20,8 @@ import { BeeperClient, BeeperAccount, BeeperChat, BeeperMessage } from '../servi
 // ═══════════════════════════════════════════════════════════════
 
 // Even G2: 576px wide, ~288px tall
-// Each line is ~40px tall, so we can fit ~7 lines + header
 const MAX_VISIBLE_ITEMS = 6   // Max items visible on screen
+const SEPARATOR_LINE = '--------------------------------'  // 36 dashes for display width
 
 // ASCII indicators (safe for glasses font)
 const ICONS = {
@@ -37,6 +37,11 @@ const QUICK_REPLIES = [
   'Got it', 'OK', 'Thanks!', 'See you',
   'On way', 'Call me', 'Busy', 'Later'
 ]
+
+// Helper: create a separator line (uses dashes instead of Unicode)
+function sep(): DisplayLine {
+  return line(SEPARATOR_LINE, 'separator')
+}
 
 // ═══════════════════════════════════════════════════════════════
 // TYPES
@@ -141,7 +146,7 @@ function buildAccountsDisplay(state: AppState, highlightedIdx: number): DisplayL
     }
   })
   
-  lines.push(separator())
+  lines.push(sep())
   lines.push(line(buildStaticActionBar(['Select'], -1), 'meta'))
   
   return lines
@@ -180,7 +185,7 @@ function buildChatsDisplay(state: AppState, highlightedIdx: number): DisplayLine
     })
   }
   
-  lines.push(separator())
+  lines.push(sep())
   
   // Show current position in list
   const posText = `${highlightedIdx + 1}/${state.chats.length}`
@@ -214,7 +219,7 @@ function buildMessagesDisplay(state: AppState, _highlightedIdx: number, flashPha
     })
   }
   
-  lines.push(separator())
+  lines.push(sep())
   
   // Reply action (blinking)
   const hasIncoming = visibleMessages.some(m => !m.isSender)
@@ -255,7 +260,7 @@ function buildQuickReplyDisplay(state: AppState, highlightedIdx: number): Displa
     lines.push(line(lineText, 'normal'))
   }
   
-  lines.push(separator())
+  lines.push(sep())
   
   // Cancel
   const isCancelSelected = highlightedIdx >= QUICK_REPLIES.length
