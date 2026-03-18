@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { GlassesUI } from './glasses/GlassesUI'
 import { DevModeUI } from './components/DevModeUI'
-import { authenticateWithBeeper, BeeperClient, BeeperAccount, BeeperChat, getBeeperConfig, updateBeeperConfig, clearBeeperConfig } from './services'
+import { authenticateWithBeeper, BeeperClient, BeeperAccount, BeeperChat, getBeeperConfig, updateBeeperConfig, clearBeeperConfig, saveLastOpenedState, getLastOpenedState, clearLastOpenedState } from './services'
 
 /**
  * Even Messages App
@@ -70,6 +70,44 @@ export default function App() {
     setIsGlassesConnected(true)
   }, [])
 
+  // Restore last opened conversation after authentication and data load
+  useEffect(() => {
+    if (isAuthenticated && accounts.length > 0 && chats.length > 0) {
+      const lastState = getLastOpenedState()
+      if (lastState) {
+        // Only restore if the saved account still exists
+        const accountExists = accounts.some(a => a.id === lastState.accountId)
+        if (accountExists) {
+          setSelectedAccount(lastState.accountId)
+          setCurrentView(lastState.view)
+          
+          // For messages view, verify the chat still exists
+          if (lastState.view === 'messages' && lastState.chatId) {
+            const chatExists = chats.some(c => c.id === lastState.chatId)
+            if (chatExists) {
+              setSelectedChat(lastState.chatId)
+            } else {
+              // Chat no longer exists, go back to chats view
+              setSelectedChat(null)
+              setCurrentView('chats')
+            }
+          }
+        }
+      }
+    }
+  }, [isAuthenticated, accounts.length, chats.length])
+
+  // Save state when account changes
+  useEffect(() => {
+    if (isAuthenticated) {
+      saveLastOpenedState({
+        accountId: selectedAccount,
+        chatId: selectedChat,
+        view: currentView
+      })
+    }
+  }, [selectedAccount, selectedChat, currentView, isAuthenticated])
+
   const handleLogin = useCallback(async () => {
     setIsAuthenticating(true)
     setError(null)
@@ -115,7 +153,11 @@ export default function App() {
     setIsAuthenticated(false)
     setAccounts([])
     setChats([])
+    setSelectedAccount(null)
+    setSelectedChat(null)
+    setCurrentView('accounts')
     clearBeeperConfig()
+    clearLastOpenedState()
   }, [])
 
   const handleAccountSelect = useCallback((id: string) => {

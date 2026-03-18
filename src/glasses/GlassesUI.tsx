@@ -23,6 +23,7 @@ import { buildHeaderLine } from "even-toolkit/text-utils";
 import { line } from "even-toolkit/types";
 import { useFlashPhase } from "even-toolkit/useFlashPhase";
 import { useGlasses } from "even-toolkit/useGlasses";
+import { waitForEvenAppBridge, type EvenAppBridge } from "@evenrealities/even_hub_sdk";
 
 // ═══════════════════════════════════════════════════════════════
 // DISPLAY CONSTANTS
@@ -36,7 +37,7 @@ const DISPLAY_WIDTH = 60; // Max characters per line
 const DISPLAY_LINES = 8; // Max lines on Even G2 display (288px / ~40px per line)
 const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 
-// LocalStorage key for persisting state
+// Storage key for persisting state (using Even SDK storage)
 const STORAGE_KEY = "even-messages-state";
 
 // Saved state interface
@@ -44,6 +45,20 @@ interface SavedState {
   selectedAccount: string | null;
   selectedChat: string | null;
   chatScrollPosition?: number;
+}
+
+// Bridge instance for storage
+let bridgeInstance: EvenAppBridge | null = null;
+
+async function getBridge(): Promise<EvenAppBridge | null> {
+  if (bridgeInstance) return bridgeInstance;
+  try {
+    bridgeInstance = await waitForEvenAppBridge();
+    return bridgeInstance;
+  } catch (e) {
+    console.warn("[GlassesUI] Failed to get bridge:", e);
+    return null;
+  }
 }
 
 // ASCII indicators (safe for glasses font)
@@ -68,14 +83,22 @@ const QUICK_REPLIES = [
 ];
 
 // ═══════════════════════════════════════════════════════════════
-// PERSISTENCE
+// PERSISTENCE (Using Even SDK Storage)
 // ═══════════════════════════════════════════════════════════════
 
-function loadSavedState(): SavedState {
+async function loadSavedState(): Promise<SavedState> {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      return JSON.parse(saved);
+    const bridge = await getBridge();
+    if (bridge) {
+      const saved = await bridge.getLocalStorage(STORAGE_KEY);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    }
+    // Fallback to browser localStorage for development
+    const fallback = localStorage.getItem(STORAGE_KEY);
+    if (fallback) {
+      return JSON.parse(fallback);
     }
   } catch (e) {
     console.warn("[GlassesUI] Failed to load saved state:", e);
@@ -83,7 +106,17 @@ function loadSavedState(): SavedState {
   return { selectedAccount: null, selectedChat: null };
 }
 
-function saveState(state: SavedState): void {
+async function saveState(state: SavedState): Promise<void> {
+  try {
+    const bridge = await getBridge();
+    if (bridge) {
+      await bridge.setLocalStorage(STORAGE_KEY, JSON.stringify(state));
+      return;
+    }
+  } catch (e) {
+    console.warn("[GlassesUI] SDK storage failed, using fallback:", e);
+  }
+  // Fallback to browser localStorage for development
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
@@ -98,6 +131,7 @@ function stripUnsupportedChars(text: string): string {
   // Also remove other symbols like playing cards, misc symbols, dingbats beyond what we use
   return text
     .replace(/[\u{1F300}-\u{1F9FF}]/gu, "[emoji]") // Misc symbols and emoji
+    .replace(/[\u{1FA00}-\u{1FAFF}]/gu, "[emoji]") // Symbols and Pictographs Extended-A (includes U+1FAF0 Love-You gesture)
     .replace(/[\u{2600}-\u{26FF}]/gu, "") // Misc symbols
     .replace(/[\u{2700}-\u{27BF}]/gu, "") // Dingbats
     .replace(/[\u{1F000}-\u{1F02F}]/gu, "") // Mahjong tiles
@@ -168,36 +202,44 @@ function truncateName(text: string, max: number): string {
   return result.slice(0, max);
 }
 
-// Calculate the max scroll position so that scrolling stops when "[more below]" disappears
+// Calculate the scroll position to show maximum messages while keeping the bottom visible
 function getMaxScrollForMessages(messages: BeeperMessage[]): number {
   if (messages.length === 0) return 0;
   
   const LINES_FOR_MESSAGES = DISPLAY_LINES - 3; // header, separator, action bar
-  const DISPLAY_W = DISPLAY_WIDTH;
   
-  // Try different scroll positions and find the max one where all remaining messages fit
+  // Start from bottom and work backwards to find the scroll that shows max messages
+  // Keep going until adding the next message would overflow
+  let lastValidScroll = Math.max(0, messages.length - 1); // Default to bottom (1 msg)
+  
   for (let scroll = Math.max(0, messages.length - 1); scroll >= 0; scroll--) {
     let lineCount = 0;
-    let msgCount = 0;
     
-    for (let i = scroll; i < messages.length && lineCount < LINES_FOR_MESSAGES; i++) {
+    for (let i = scroll; i < messages.length; i++) {
       const msg = messages[i];
       const sender = msg.isSender ? ">" : truncateName(msg.senderName || "?", 8);
       const prefix = `[00:00] ${sender}: `;
       const content = stripUnsupportedChars(msg.text || "[media]");
-      const wrappedLines = wordWrap(content, DISPLAY_W - prefix.length);
+      const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
       
       lineCount += wrappedLines.length;
-      msgCount++;
+      
+      // Stop counting once we've exceeded capacity
+      if (lineCount > LINES_FOR_MESSAGES) {
+        break;
+      }
     }
     
-    // If adding the next message would overflow, this scroll is valid
     if (lineCount <= LINES_FOR_MESSAGES) {
-      return scroll;
+      // This scroll position is valid - keep track of it
+      lastValidScroll = scroll;
+    } else {
+      // First invalid position - return the last valid one
+      return lastValidScroll;
     }
   }
   
-  return 0;
+  return lastValidScroll;
 }
 
 // Word-wrap text to fit within maxWidth, breaking words as needed
@@ -707,26 +749,26 @@ export function GlassesUI({
 }: {
   beeperConfig: { baseUrl: string; token: string } | null;
 }) {
-  // Load saved state from localStorage
-  const savedState = loadSavedState();
-
   const [state, setState] = useState<AppState>({
     accounts: [],
     chats: [],
     messages: [],
-    currentScreen: savedState.selectedChat
-      ? "messages"
-      : savedState.selectedAccount
-        ? "chats"
-        : "accounts",
-    selectedAccount: savedState.selectedAccount,
-    selectedChat: savedState.selectedChat,
+    currentScreen: "accounts",
+    selectedAccount: null,
+    selectedChat: null,
     selectedMessageIndex: 0,
     highlightedIndex: 0,
     isLoading: true,
-    messageScrollOffset: savedState.chatScrollPosition || 0,
+    messageScrollOffset: 0,
     demoMode: false,
   });
+
+  // Ref to store saved state for use in effects
+  const savedStateRef = useRef<SavedState>({ selectedAccount: null, selectedChat: null });
+
+  // Ref for WebSocket connection
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const beeper = beeperConfig ? new BeeperClient(beeperConfig) : null;
 
@@ -736,40 +778,72 @@ export function GlassesUI({
   // Demo mode: click timestamps tracked in onGlassAction
   const clickTimestamps = useRef<number[]>([]);
 
-  // Load initial data
+  // Load saved state and initial data
   useEffect(() => {
-    async function load() {
+    async function init() {
+      // First, load the saved state from storage
+      const savedState = await loadSavedState();
+      savedStateRef.current = savedState;
+
+      // Set initial state based on saved state
+      setState((s) => ({
+        ...s,
+        currentScreen: savedState.selectedChat
+          ? "messages"
+          : savedState.selectedAccount
+            ? "chats"
+            : "accounts",
+        selectedAccount: savedState.selectedAccount,
+        selectedChat: savedState.selectedChat,
+        messageScrollOffset: savedState.chatScrollPosition || 0,
+      }));
+
+      // Then load data
+      await loadData(savedState);
+    }
+
+    async function loadData(savedState: SavedState) {
       try {
         let accounts: BeeperAccount[] = [];
         if (beeper) {
           accounts = await beeper.listAccounts();
         }
 
-        const initialChats = accounts.length === 0 ? getDemoChats() : [];
+        // If we have a saved state with an account, load chats for that account first
+        // Otherwise, use demo data if no real accounts
+        const shouldUseDemo = accounts.length === 0;
 
-        setState((s) => ({
-          ...s,
-          accounts,
-          chats: initialChats,
-          isLoading: false,
-        }));
+        if (savedState.selectedChat && !shouldUseDemo) {
+          // We have a saved chat and real accounts - try to restore it
+          await restoreSavedChat(accounts, savedState.selectedAccount, savedState.selectedChat);
+        } else {
+          // No saved chat or demo mode - set initial state normally
+          const initialChats = shouldUseDemo ? getDemoChats() : [];
 
-        // If we had a saved chat, try to restore it
-        if (savedState.selectedChat) {
-          const chatExists = initialChats.some(
-            (c) => c.id === savedState.selectedChat,
-          );
-          if (chatExists) {
-            loadMessages(savedState.selectedChat);
-          } else {
-            // Chat no longer exists, go back to chats list
-            saveState({ selectedAccount: null, selectedChat: null });
-            setState((s) => ({
-              ...s,
-              currentScreen: savedState.selectedAccount ? "chats" : "accounts",
-              selectedAccount: savedState.selectedAccount,
-              selectedChat: null,
-            }));
+          setState((s) => ({
+            ...s,
+            accounts,
+            chats: initialChats,
+            isLoading: false,
+          }));
+
+          // Demo mode: check if saved chat exists in demo data
+          if (savedState.selectedChat && shouldUseDemo) {
+            const chatExists = initialChats.some(
+              (c) => c.id === savedState.selectedChat,
+            );
+            if (chatExists) {
+              loadMessages(savedState.selectedChat);
+            } else {
+              // Chat no longer exists, go back to chats list
+              await saveState({ selectedAccount: null, selectedChat: null });
+              setState((s) => ({
+                ...s,
+                currentScreen: savedState.selectedAccount ? "chats" : "accounts",
+                selectedAccount: savedState.selectedAccount,
+                selectedChat: null,
+              }));
+            }
           }
         }
       } catch (e) {
@@ -782,7 +856,7 @@ export function GlassesUI({
           isLoading: false,
         }));
 
-        // If we had a saved chat, try to restore it
+        // If we had a saved chat, try to restore it in demo mode
         if (savedState.selectedChat) {
           const chatExists = demoChats.some(
             (c) => c.id === savedState.selectedChat,
@@ -791,7 +865,7 @@ export function GlassesUI({
             loadMessages(savedState.selectedChat);
           } else {
             // Chat no longer exists, go back to chats list
-            saveState({ selectedAccount: null, selectedChat: null });
+            await saveState({ selectedAccount: null, selectedChat: null });
             setState((s) => ({
               ...s,
               currentScreen: savedState.selectedAccount ? "chats" : "accounts",
@@ -802,20 +876,163 @@ export function GlassesUI({
         }
       }
     }
-    load();
+
+    async function restoreSavedChat(
+      accounts: BeeperAccount[],
+      savedAccountId: string | null,
+      savedChatId: string
+    ) {
+      if (!beeper) return;
+
+      try {
+        // Load chats for the saved account (or all chats if no specific account)
+        const result = await beeper.listChats(
+          savedAccountId ? { accountIDs: [savedAccountId] } : undefined
+        );
+        const loadedChats = result.chats;
+
+        // Check if the saved chat exists in loaded chats
+        const chatExists = loadedChats.some((c) => c.id === savedChatId);
+
+        if (chatExists) {
+          // Restore the chat view
+          setState((s) => ({
+            ...s,
+            accounts,
+            chats: loadedChats,
+            selectedAccount: savedAccountId,
+            selectedChat: savedChatId,
+            currentScreen: "messages",
+            highlightedIndex: 0,
+            isLoading: true,
+          }));
+          loadMessages(savedChatId);
+        } else {
+          // Chat no longer exists, clear saved state and show chats for the account
+          await saveState({ selectedAccount: savedAccountId, selectedChat: null });
+          setState((s) => ({
+            ...s,
+            accounts,
+            chats: loadedChats,
+            selectedAccount: savedAccountId,
+            selectedChat: null,
+            currentScreen: savedAccountId ? "chats" : "accounts",
+            isLoading: false,
+          }));
+        }
+      } catch (err) {
+        console.error("[GlassesUI] Failed to restore saved chat:", err);
+        // Fall back to accounts view
+        await saveState({ selectedAccount: null, selectedChat: null });
+        setState((s) => ({
+          ...s,
+          accounts,
+          chats: [],
+          currentScreen: "accounts",
+          selectedAccount: null,
+          selectedChat: null,
+          isLoading: false,
+        }));
+      }
+    }
+
+    init();
 
     // Keep alive
     activateKeepAlive("even-messages");
     return () => deactivateKeepAlive();
   }, []);
 
-  // Persist state changes to localStorage
+  // WebSocket connection for real-time updates
   useEffect(() => {
-    saveState({
-      selectedAccount: state.selectedAccount,
-      selectedChat: state.selectedChat,
-      chatScrollPosition: state.messageScrollOffset,
-    });
+    // Skip in demo mode or if no beeper client
+    if (!beeper || state.demoMode) return;
+
+    let ws: WebSocket | null = null;
+    let isMounted = true;
+
+    function connect() {
+      if (!isMounted || state.demoMode) return;
+
+      try {
+        ws = beeper.createWebSocket((event) => {
+          if (!isMounted) return;
+
+          switch (event.type) {
+            case 'message.upserted': {
+              const msg = event.data as BeeperMessage;
+              // If this message is for the currently viewed chat, reload messages
+              if (msg.chatID === state.selectedChat) {
+                console.log('[GlassesUI] New message in current chat, reloading:', msg.text?.slice(0, 30));
+                loadMessages(state.selectedChat!);
+              }
+              // Update chat list to refresh unread counts
+              loadChats(state.selectedAccount);
+              break;
+            }
+            case 'chat.upserted': {
+              console.log('[GlassesUI] Chat updated, refreshing list');
+              loadChats(state.selectedAccount);
+              break;
+            }
+            case 'message.deleted': {
+              const deleted = event.data as { chatID: string; messageID: string };
+              if (deleted.chatID === state.selectedChat) {
+                loadMessages(state.selectedChat!);
+              }
+              break;
+            }
+            case 'chat.deleted': {
+              console.log('[GlassesUI] Chat deleted');
+              // If we're viewing the deleted chat, go back
+              if (state.currentScreen === 'messages') {
+                setState((s) => ({
+                  ...s,
+                  currentScreen: 'chats',
+                  selectedChat: null,
+                  messageScrollOffset: 0,
+                }));
+              }
+              loadChats(state.selectedAccount);
+              break;
+            }
+          }
+        });
+        wsRef.current = ws;
+      } catch (e) {
+        console.warn('[GlassesUI] WebSocket connection failed:', e);
+        // Schedule reconnect
+        if (isMounted) {
+          reconnectTimeoutRef.current = setTimeout(connect, 5000);
+        }
+      }
+    }
+
+    connect();
+
+    return () => {
+      isMounted = false;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (ws) {
+        ws.close();
+      }
+      wsRef.current = null;
+    };
+  }, [beeper, state.demoMode, state.selectedChat, state.selectedAccount]);
+
+  // Persist state changes to storage
+  useEffect(() => {
+    const persistState = async () => {
+      await saveState({
+        selectedAccount: state.selectedAccount,
+        selectedChat: state.selectedChat,
+        chatScrollPosition: state.messageScrollOffset,
+      });
+    };
+    persistState();
   }, [state.selectedAccount, state.selectedChat, state.messageScrollOffset]);
 
   // Handle selection
@@ -956,9 +1173,7 @@ export function GlassesUI({
       // In demo mode, always use demo data
       if (state.demoMode) {
         const demoMessages = getDemoMessages();
-        const LINES_FOR_MESSAGES = DISPLAY_LINES - 3;
-        const maxScroll = Math.max(0, demoMessages.length - LINES_FOR_MESSAGES);
-        const initialScroll = Math.min(maxScroll, Math.max(0, demoMessages.length - 1));
+        const initialScroll = getMaxScrollForMessages(demoMessages);
         
         setState((s) => ({
           ...s,
@@ -980,11 +1195,8 @@ export function GlassesUI({
           messages.length > 0 ? messages : getDemoMessages();
 
         // Start at the position that fills the screen (latest message at bottom)
-        // This ensures [more below] is visible and we see multiple messages
-        const initialScroll = Math.min(
-          getMaxScrollForMessages(finalMessages),
-          Math.max(0, finalMessages.length - 1)
-        );
+        // getMaxScrollForMessages returns the scroll offset that shows maximum messages
+        const initialScroll = getMaxScrollForMessages(finalMessages);
 
         setState((s) => ({
           ...s,
@@ -995,10 +1207,7 @@ export function GlassesUI({
         }));
       } catch {
         const demoMessages = getDemoMessages();
-        const initialScroll = Math.min(
-          getMaxScrollForMessages(demoMessages),
-          Math.max(0, demoMessages.length - 1)
-        );
+        const initialScroll = getMaxScrollForMessages(demoMessages);
 
         setState((s) => ({
           ...s,

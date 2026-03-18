@@ -9,6 +9,11 @@ export interface AppConfig {
     baseUrl: string
     token: string
   }
+  lastOpened?: {
+    accountId: string | null
+    chatId: string | null
+    view: 'accounts' | 'chats' | 'messages'
+  }
 }
 
 const CONFIG_KEY = 'even-messages-config'
@@ -93,4 +98,30 @@ export function clearToken(): void {
     config.beeper.token = ''
     saveConfig(config)
   }
+}
+
+/**
+ * Save the last opened conversation state
+ */
+export function saveLastOpenedState(state: { accountId: string | null; chatId: string | null; view: 'accounts' | 'chats' | 'messages' }): void {
+  const config = getConfig()
+  config.lastOpened = state
+  saveConfig(config)
+}
+
+/**
+ * Get the last opened conversation state
+ */
+export function getLastOpenedState(): { accountId: string | null; chatId: string | null; view: 'accounts' | 'chats' | 'messages' } | null {
+  const config = getConfig()
+  return config.lastOpened || null
+}
+
+/**
+ * Clear the last opened conversation state
+ */
+export function clearLastOpenedState(): void {
+  const config = getConfig()
+  delete config.lastOpened
+  saveConfig(config)
 }
