@@ -979,9 +979,12 @@ export function GlassesUI({
         const finalMessages =
           messages.length > 0 ? messages : getDemoMessages();
 
-        // Calculate scroll offset to fill the screen with messages
-        // Use getMaxScrollForMessages to find the max valid scroll position
-        const initialScroll = getMaxScrollForMessages(finalMessages);
+        // Start at the position that fills the screen (latest message at bottom)
+        // This ensures [more below] is visible and we see multiple messages
+        const initialScroll = Math.min(
+          getMaxScrollForMessages(finalMessages),
+          Math.max(0, finalMessages.length - 1)
+        );
 
         setState((s) => ({
           ...s,
@@ -992,7 +995,10 @@ export function GlassesUI({
         }));
       } catch {
         const demoMessages = getDemoMessages();
-        const initialScroll = getMaxScrollForMessages(demoMessages);
+        const initialScroll = Math.min(
+          getMaxScrollForMessages(demoMessages),
+          Math.max(0, demoMessages.length - 1)
+        );
 
         setState((s) => ({
           ...s,
