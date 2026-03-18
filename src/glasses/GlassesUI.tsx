@@ -32,6 +32,7 @@ import { useGlasses } from "even-toolkit/useGlasses";
 // Font: 22px Courier New monospace (~12px per char)
 // Visible width: ~48 chars, but leaving padding, use 40 chars
 const MAX_VISIBLE_ITEMS = 8; // Max items visible on screen
+const VISIBLE_MESSAGES = 8; // Number of messages to show per page
 const DISPLAY_WIDTH = 70; // Max characters per line
 const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 
@@ -41,7 +42,7 @@ const ICONS = {
   BACK: "<",
   DIRECT: "[Direct]",
   GROUP: "[Group]",
-  UNREAD: "[Unread]",
+  UNREAD: "[!",
 };
 
 // Quick reply presets (2 columns x 4 rows = 8 replies)
@@ -77,6 +78,7 @@ interface AppState {
   selectedMessageIndex: number;
   highlightedIndex: number;
   isLoading: boolean;
+  messageScrollOffset: number; // For scrolling through messages
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -307,15 +309,30 @@ function buildMessagesDisplay(
     line(buildHeaderLine(`${ICONS.BACK} ${chatName}`, ""), "inverted"),
   );
 
-  // Messages - show last 5
-  const visibleMessages = state.messages.slice(-5);
+  // Calculate scroll window - show VISIBLE_MESSAGES from end or from offset
+  const totalMessages = state.messages.length;
+  const scrollOffset = Math.min(
+    state.messageScrollOffset,
+    Math.max(0, totalMessages - VISIBLE_MESSAGES),
+  );
+
+  // Show indicator if there are more messages above
+  if (scrollOffset > 0) {
+    lines.push(line("[more above]", "meta"));
+  }
+
+  // Get messages to display
+  const endIndex = Math.min(scrollOffset + VISIBLE_MESSAGES, totalMessages);
+  const visibleMessages = state.messages.slice(scrollOffset, endIndex);
 
   if (visibleMessages.length === 0) {
     lines.push(line("No messages yet - send one!", "normal"));
   } else {
     visibleMessages.forEach((msg) => {
       const time = formatTime(msg.timestamp);
-      const sender = msg.isSender ? ">" : truncateName(msg.senderName || "?", 8);
+      const sender = msg.isSender
+        ? ">"
+        : truncateName(msg.senderName || "?", 8);
       const prefix = `[${time}] ${sender}: `;
 
       // Wrap message content at word boundaries
@@ -330,6 +347,11 @@ function buildMessagesDisplay(
         lines.push(line(`             ${wrappedLines[i]}`, "normal"));
       }
     });
+  }
+
+  // Show indicator if there are more messages below
+  if (endIndex < totalMessages) {
+    lines.push(line("[more below]", "meta"));
   }
 
   lines.push(sep());
@@ -354,7 +376,9 @@ function buildQuickReplyDisplay(
 
   // Header
   const msg = state.messages[state.selectedMessageIndex];
-  const sender = msg ? truncateName(msg.senderName || "Unknown", 16) : "Unknown";
+  const sender = msg
+    ? truncateName(msg.senderName || "Unknown", 16)
+    : "Unknown";
   lines.push(line(buildHeaderLine(`Reply: ${sender}`, ""), "inverted"));
 
   // Quick replies in 2 columns
@@ -555,6 +579,7 @@ export function GlassesUI({
     selectedMessageIndex: 0,
     highlightedIndex: 0,
     isLoading: true,
+    messageScrollOffset: 0,
   });
 
   const beeper = beeperConfig ? new BeeperClient(beeperConfig) : null;
@@ -634,6 +659,7 @@ export function GlassesUI({
             updates.selectedChat = chat.id;
             updates.isLoading = true;
             updates.selectedMessageIndex = 0;
+            updates.messageScrollOffset = 0; // Reset scroll, show latest messages
 
             loadMessages(chat.id);
           }
@@ -684,6 +710,7 @@ export function GlassesUI({
       case "messages":
         updates.currentScreen = "chats";
         updates.selectedChat = null;
+        updates.messageScrollOffset = 0; // Reset scroll for next visit
         break;
       case "quickReply":
         updates.currentScreen = "messages";
@@ -809,6 +836,25 @@ export function GlassesUI({
     ): GlassNavState => {
       switch (action.type) {
         case "HIGHLIGHT_MOVE": {
+          // Handle scrolling in messages screen
+          if (snapshot.currentScreen === "messages") {
+            const totalMessages = snapshot.messages.length;
+            const maxScroll = Math.max(0, totalMessages - VISIBLE_MESSAGES);
+            const newScroll = Math.max(
+              0,
+              Math.min(
+                maxScroll,
+                snapshot.messageScrollOffset +
+                  (action.direction === "down" ? 1 : -1),
+              ),
+            );
+            if (newScroll !== snapshot.messageScrollOffset) {
+              setState((s) => ({ ...s, messageScrollOffset: newScroll }));
+            }
+            return nav;
+          }
+
+          // Normal highlight navigation for other screens
           const maxIdx = getMaxIndex(snapshot);
           const newIdx = Math.max(
             0,
