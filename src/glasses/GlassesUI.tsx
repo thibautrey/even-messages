@@ -165,6 +165,7 @@ function truncateName(text: string, max: number): string {
 
 // Word-wrap text to fit within maxWidth, breaking at word boundaries
 function wordWrap(text: string, maxWidth: number): string[] {
+  if (!text || text.length === 0) return [""];
   if (text.length <= maxWidth) return [text];
 
   const words = text.split(" ");
@@ -172,6 +173,8 @@ function wordWrap(text: string, maxWidth: number): string[] {
   let currentLine = "";
 
   for (const word of words) {
+    if (!word) continue; // Skip empty words
+    
     // If single word is longer than maxWidth, break it
     if (word.length > maxWidth) {
       if (currentLine) {
@@ -197,7 +200,7 @@ function wordWrap(text: string, maxWidth: number): string[] {
     }
   }
 
-  if (currentLine) {
+  if (currentLine.trim()) {
     lines.push(currentLine.trim());
   }
 
@@ -418,14 +421,21 @@ function buildMessagesDisplay(
 
       // Strip unsupported characters and wrap message content
       const content = stripUnsupportedChars(msg.text || "[media]");
-      const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
+      let wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
+      // Filter out any empty lines
+      wrappedLines = wrappedLines.filter(line => line.length > 0);
+
+      // Skip if no content
+      if (wrappedLines.length === 0) return;
 
       // First line with prefix
       lines.push(line(`${prefix}${wrappedLines[0]}`, "normal"));
 
       // Continuation lines (indented)
       for (let i = 1; i < wrappedLines.length; i++) {
-        lines.push(line(`             ${wrappedLines[i]}`, "normal"));
+        if (wrappedLines[i]) {
+          lines.push(line(`             ${wrappedLines[i]}`, "normal"));
+        }
       }
     });
   }
