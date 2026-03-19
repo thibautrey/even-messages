@@ -770,6 +770,10 @@ export function GlassesUI({
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Ref to prevent double-loadMessages after sending (debounce)
+  const suppressReloadRef = useRef<boolean>(false);
+  const suppressReloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const beeper = beeperConfig ? new BeeperClient(beeperConfig) : null;
 
   // Flash phase for blinking action indicators
@@ -963,10 +967,23 @@ export function GlassesUI({
               const msg = event.data as BeeperMessage;
               // If this message is for the currently viewed chat, reload messages
               if (msg.chatID === state.selectedChat) {
-                console.log('[GlassesUI] New message in current chat, reloading:', msg.text?.slice(0, 30));
-                loadMessages(state.selectedChat!);
+                // Skip reload if we just sent a message (debounce to prevent duplicates)
+                if (suppressReloadRef.current) {
+                  console.log('[GlassesUI] Skipping WebSocket reload - message was just sent');
+                  suppressReloadRef.current = false;
+                  if (suppressReloadTimeoutRef.current) {
+                    clearTimeout(suppressReloadTimeoutRef.current);
+                    suppressReloadTimeoutRef.current = null;
+                  }
+                } else if (!msg.isSender) {
+                  // Only reload for incoming messages, not our own sent messages
+                  console.log('[GlassesUI] New incoming message in current chat, reloading:', msg.text?.slice(0, 30));
+                  loadMessages(state.selectedChat!);
+                } else {
+                  console.log('[GlassesUI] Our own message received via WebSocket, skipping reload');
+                }
               }
-              // Update chat list to refresh unread counts
+              // Update chat list to refresh unread counts (always do this)
               loadChats(state.selectedAccount);
               break;
             }
@@ -1036,14 +1053,15 @@ export function GlassesUI({
   }, [state.selectedAccount, state.selectedChat, state.messageScrollOffset]);
 
   // Handle selection
+  // Note: highlightedIndex comes from nav state (useGlasses), not app state
   const handleSelect = useCallback(
-    (s: AppState): Partial<AppState> => {
+    (s: AppState, highlightedIndex: number): Partial<AppState> => {
       const updates: Partial<AppState> = {};
 
       switch (s.currentScreen) {
         case "accounts": {
           // "All Chats" is index 0
-          if (s.highlightedIndex === 0) {
+          if (highlightedIndex === 0) {
             updates.selectedAccount = null;
           } else {
             // Find the account at this index
@@ -1052,7 +1070,7 @@ export function GlassesUI({
             for (const account of s.accounts) {
               if (!seen.has(account.accountID)) {
                 seen.add(account.accountID);
-                if (itemIdx === s.highlightedIndex) {
+                if (itemIdx === highlightedIndex) {
                   updates.selectedAccount = account.accountID;
                   break;
                 }
@@ -1070,8 +1088,8 @@ export function GlassesUI({
         }
 
         case "chats": {
-          if (s.highlightedIndex < s.chats.length) {
-            const chat = s.chats[s.highlightedIndex];
+          if (highlightedIndex < s.chats.length) {
+            const chat = s.chats[highlightedIndex];
             updates.currentScreen = "messages";
             updates.selectedChat = chat.id;
             updates.isLoading = true;
@@ -1091,8 +1109,8 @@ export function GlassesUI({
         }
 
         case "quickReply": {
-          if (s.highlightedIndex < QUICK_REPLIES.length) {
-            const reply = QUICK_REPLIES[s.highlightedIndex];
+          if (highlightedIndex < QUICK_REPLIES.length) {
+            const reply = QUICK_REPLIES[highlightedIndex];
             sendMessage(reply);
             updates.currentScreen = "messages";
             updates.highlightedIndex = 0;
@@ -1227,10 +1245,23 @@ export function GlassesUI({
       if (beeper && state.selectedChat) {
         try {
           await beeper.sendMessage(state.selectedChat, { text });
-          const chatId = state.selectedChat;
-          if (chatId) loadMessages(chatId);
+          console.log("[GlassesUI] Message sent, reloading messages:", text);
+          
+          // Set suppress flag to prevent WebSocket from triggering another loadMessages
+          suppressReloadRef.current = true;
+          if (suppressReloadTimeoutRef.current) {
+            clearTimeout(suppressReloadTimeoutRef.current);
+          }
+          suppressReloadTimeoutRef.current = setTimeout(() => {
+            suppressReloadRef.current = false;
+            suppressReloadTimeoutRef.current = null;
+          }, 2000); // Suppress for 2 seconds
+          
+          loadMessages(state.selectedChat);
         } catch (e) {
           console.error("[GlassesUI] Send failed:", e);
+          // Reload messages on failure to clear any pending state
+          loadMessages(state.selectedChat);
         }
       } else {
         console.log("[GlassesUI] Would send:", text);
@@ -1279,6 +1310,19 @@ export function GlassesUI({
   );
 
   // Handle glass actions
+  // Note: We use a ref to access latest handlers to avoid stale closure issues
+  const handleSelectRef = useRef(handleSelect);
+  const handleBackRef = useRef(handleBack);
+  
+  // Update refs when handlers change
+  useEffect(() => {
+    handleSelectRef.current = handleSelect;
+  }, [handleSelect]);
+  
+  useEffect(() => {
+    handleBackRef.current = handleBack;
+  }, [handleBack]);
+  
   const onGlassAction = useCallback(
     (
       action: GlassAction,
@@ -1350,8 +1394,9 @@ export function GlassesUI({
             return nav;
           }
           
+          // Use ref to get latest handler and pass nav.highlightedIndex (source of truth)
           setState((s) => {
-            const updates = handleSelect(s);
+            const updates = handleSelectRef.current(s, nav.highlightedIndex);
             return { ...s, ...updates };
           });
           return nav;
@@ -1359,14 +1404,14 @@ export function GlassesUI({
 
         case "GO_BACK": {
           setState((s) => {
-            const updates = handleBack(s);
+            const updates = handleBackRef.current(s);
             return { ...s, ...updates };
           });
           return nav;
         }
       }
     },
-    [handleSelect, handleBack],
+    [], // Empty deps - we use refs to access latest handlers
   );
 
   // Connect to glasses
