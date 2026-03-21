@@ -76,7 +76,7 @@ export default function App() {
       const lastState = getLastOpenedState()
       if (lastState) {
         // Only restore if the saved account still exists
-        const accountExists = accounts.some(a => a.id === lastState.accountId)
+        const accountExists = accounts.some(a => a.accountID === lastState.accountId)
         if (accountExists) {
           setSelectedAccount(lastState.accountId)
           setCurrentView(lastState.view)

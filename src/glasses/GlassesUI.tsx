@@ -956,7 +956,7 @@ export function GlassesUI({
     let isMounted = true;
 
     function connect() {
-      if (!isMounted || state.demoMode) return;
+      if (!isMounted || state.demoMode || !beeper) return;
 
       try {
         ws = beeper.createWebSocket((event) => {
