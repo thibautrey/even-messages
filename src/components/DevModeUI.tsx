@@ -133,21 +133,35 @@ window.fetch = async (...args) => {
     return response
   } catch (error: any) {
     const duration = Date.now() - startTime
-    const errorMessage = error.message || String(error)
     
-    // Detect CORS errors
-    if (errorMessage.includes('Failed to fetch') || 
-        errorMessage.includes('NetworkError') ||
-        errorMessage.includes('Network request failed') ||
-        errorMessage.toLowerCase().includes('cors')) {
+    // Try to extract detailed error info
+    let errorMessage = error.message || String(error)
+    let errorName = error.name || ''
+    let errorDetails = error.toString()
+    
+    // For fetch errors, we often get limited info
+    // Check if it's a TypeError with "Failed to fetch"
+    if (error instanceof TypeError && errorMessage === 'Failed to fetch') {
       addLog(
         'cors',
-        `CORS/Fetch Error: ${errorMessage}`,
+        `Network blocked: "Failed to fetch"`,
         'error',
-        `Request: ${method} ${url}\nDuration: ${duration}ms\n\nThis typically means:\n1. The server is not reachable\n2. Missing CORS headers on server\n3. Mixed content (http vs https)\n4. Server not running`
+        `Request: ${method} ${url}\nDuration: ${duration}ms\n\nError type: ${errorName}\n\nThis typically means:\n1. WebView is blocking local network requests\n2. Even Realities app doesn't have network access permission\n3. CORS preflight failed before reaching server\n4. DNS lookup failed\n\nSafari can access this URL because:\n- Safari has different security policies\n- Even app WebView may have restricted network access\n\nSolution: Check Even Realities app permissions or run the app in Safari.`
+      )
+    } else if (errorMessage.includes('Load failed')) {
+      addLog(
+        'cors',
+        `Request blocked: "Load failed"`,
+        'error',
+        `Request: ${method} ${url}\nDuration: ${duration}ms\nError: ${errorDetails}\n\n"Load failed" typically occurs in WebViews when:\n1. The WebView blocks cross-origin requests\n2. Local network access is restricted (iOS/macOS)\n3. The Even Realities app doesn't allow external network calls\n\nTry: Open app in Safari directly instead of Even Realities WebView`
       )
     } else {
-      addLog('api-error', `${method} ${url} - ERROR: ${errorMessage}`, 'error', `Duration: ${duration}ms`)
+      addLog(
+        'api-error', 
+        `${method} ${url} - ERROR: ${errorMessage}`, 
+        'error', 
+        `Duration: ${duration}ms\nError type: ${errorName}\nDetails: ${errorDetails}`
+      )
     }
     
     throw error
