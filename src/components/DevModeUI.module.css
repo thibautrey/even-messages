@@ -672,3 +672,187 @@
 .saveButton:hover {
   background: #4f46e5;
 }
+
+/* Show Logs Button */
+.showLogsButton {
+  background: transparent;
+  border: none;
+  color: #6366f1;
+  cursor: pointer;
+  font-size: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.showLogsButton:hover {
+  color: #818cf8;
+}
+
+/* Debug Panel */
+.debugPanel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40vh;
+  min-height: 200px;
+  max-height: 500px;
+  background: #0a0a0f;
+  border-top: 2px solid #3d3d5a;
+  display: flex;
+  flex-direction: column;
+  z-index: 9999;
+  font-family: 'SF Mono', 'Fira Code', 'Monaco', 'Consolas', monospace;
+}
+
+.debugHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #16162a;
+  border-bottom: 1px solid #2d2d4a;
+  flex-shrink: 0;
+}
+
+.debugTitle {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.debugActions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.debugClear,
+.debugClose {
+  background: #2d2d4a;
+  border: 1px solid #3d3d5a;
+  color: #a0a0a0;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+}
+
+.debugClear:hover,
+.debugClose:hover {
+  background: #3d3d5a;
+  color: #fff;
+}
+
+.debugContent {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.debugEmpty {
+  color: #6b6b6b;
+  text-align: center;
+  padding: 2rem;
+}
+
+.debugEntry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  margin-bottom: 0.125rem;
+}
+
+.debugEntry:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.logTime {
+  color: #6b6b6b;
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+}
+
+.logIcon {
+  width: 1.25rem;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.logMessage {
+  flex: 1;
+  word-break: break-all;
+}
+
+.logDetails {
+  width: 100%;
+  margin: 0.25rem 0 0 1.75rem;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  white-space: pre-wrap;
+  color: #9ca3af;
+}
+
+.logRequest {
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.logRequest .logIcon {
+  color: #60a5fa;
+}
+
+.logResponse {
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.logResponse .logIcon {
+  color: #4ade80;
+}
+
+.logError {
+  background: rgba(248, 113, 113, 0.15);
+}
+
+.logError .logIcon {
+  color: #f87171;
+}
+
+.logError .logMessage {
+  color: #fca5a5;
+}
+
+.logConsole {
+  background: transparent;
+}
+
+.logConsole .logIcon {
+  color: #fbbf24;
+}
+
+.logInfo {
+  background: transparent;
+}
+
+.logInfo .logIcon {
+  color: #a78bfa;
+}
+
+.debugFooter {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: #16162a;
+  border-top: 1px solid #2d2d4a;
+  font-size: 0.7rem;
+  color: #6b6b6b;
+  flex-shrink: 0;
+}

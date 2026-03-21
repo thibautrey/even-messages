@@ -2,6 +2,168 @@ import { useState, useRef, useEffect } from 'react'
 import { BeeperAccount, BeeperChat, getBeeperConfig } from '../services'
 import styles from './DevModeUI.module.css'
 
+// Debug logging system
+interface LogEntry {
+  id: number
+  timestamp: Date
+  type: 'api-request' | 'api-response' | 'api-error' | 'console' | 'info' | 'cors'
+  message: string
+  details?: string
+  status?: number
+  duration?: number
+}
+
+let logIdCounter = 0
+const MAX_LOGS = 500
+
+// Global log storage
+const globalLogs: LogEntry[] = []
+
+// Capture console.log, console.error, console.warn
+const originalLog = console.log
+const originalError = console.error
+const originalWarn = console.warn
+
+console.log = (...args: any[]) => {
+  originalLog.apply(console, args)
+  addLog('console', args.map(a => formatValue(a)).join(' '))
+}
+
+console.error = (...args: any[]) => {
+  originalError.apply(console, args)
+  addLog('console', args.map(a => formatValue(a)).join(' '), 'error')
+}
+
+console.warn = (...args: any[]) => {
+  originalWarn.apply(console, args)
+  addLog('console', args.map(a => formatValue(a)).join(' '), 'warn')
+}
+
+function formatValue(val: any): string {
+  if (val === null) return 'null'
+  if (val === undefined) return 'undefined'
+  if (typeof val === 'object') {
+    try {
+      return JSON.stringify(val)
+    } catch {
+      return String(val)
+    }
+  }
+  return String(val)
+}
+
+function addLog(
+  type: LogEntry['type'],
+  message: string,
+  _subtype: 'error' | 'warn' | 'info' = 'info',
+  details?: string,
+  status?: number,
+  duration?: number
+) {
+  const entry: LogEntry = {
+    id: ++logIdCounter,
+    timestamp: new Date(),
+    type,
+    message,
+    details,
+    status,
+    duration,
+  }
+  globalLogs.unshift(entry)
+  if (globalLogs.length > MAX_LOGS) {
+    globalLogs.pop()
+  }
+  // Trigger re-render if listener is set
+  if (onNewLog) onNewLog(entry)
+}
+
+let onNewLog: ((entry: LogEntry) => void) | null = null
+
+// Patched fetch to capture API requests/responses and CORS errors
+const originalFetch = window.fetch
+window.fetch = async (...args) => {
+  const [input, init = {}] = args
+  const url = typeof input === 'string' ? input : (input as Request).url
+  const method = init.method || 'GET'
+  const startTime = Date.now()
+  
+  // Log the request
+  addLog('api-request', `${method} ${url}`)
+  
+  try {
+    const response = await originalFetch.apply(window, args)
+    const duration = Date.now() - startTime
+    const status = response.status
+    
+    // Check for CORS-related headers and issues
+    const corsHeaders = [
+      'access-control-allow-origin',
+      'access-control-allow-methods',
+      'access-control-allow-headers'
+    ]
+    const corsInfo = corsHeaders
+      .map(h => `${h}: ${response.headers.get(h) || 'NOT PRESENT'}`)
+      .join(', ')
+    
+    if (status === 0 || !response.headers.has('access-control-allow-origin')) {
+      addLog(
+        'cors',
+        `CORS issue detected: No Access-Control-Allow-Origin header`,
+        'error',
+        `Request: ${method} ${url}\nCORS headers: ${corsInfo}\nResponse status: ${status}`
+      )
+    } else if (response.type === 'opaque') {
+      addLog(
+        'cors',
+        `Opaque response (likely CORS blocked)`,
+        'error',
+        `Request: ${method} ${url}\nCORS headers: ${corsInfo}`
+      )
+    } else {
+      addLog(
+        'api-response',
+        `${method} ${url} - ${status} (${duration}ms)`,
+        'info',
+        `CORS headers: ${corsInfo}`,
+        status,
+        duration
+      )
+    }
+    
+    return response
+  } catch (error: any) {
+    const duration = Date.now() - startTime
+    const errorMessage = error.message || String(error)
+    
+    // Detect CORS errors
+    if (errorMessage.includes('Failed to fetch') || 
+        errorMessage.includes('NetworkError') ||
+        errorMessage.includes('Network request failed') ||
+        errorMessage.toLowerCase().includes('cors')) {
+      addLog(
+        'cors',
+        `CORS/Fetch Error: ${errorMessage}`,
+        'error',
+        `Request: ${method} ${url}\nDuration: ${duration}ms\n\nThis typically means:\n1. The server is not reachable\n2. Missing CORS headers on server\n3. Mixed content (http vs https)\n4. Server not running`
+      )
+    } else {
+      addLog('api-error', `${method} ${url} - ERROR: ${errorMessage}`, 'error', `Duration: ${duration}ms`)
+    }
+    
+    throw error
+  }
+}
+
+// Utility to format timestamp
+function formatTimestamp(date: Date): string {
+  return date.toLocaleTimeString('en-US', { 
+    hour12: false, 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    second: '2-digit'
+  }) + '.' + String(date.getMilliseconds()).padStart(3, '0')
+}
+
 interface DevModeUIProps {
   isGlassesConnected: boolean
   currentView: 'accounts' | 'chats' | 'messages'
@@ -56,6 +218,60 @@ export function DevModeUI({
   }
 
   const displayedChats = chats.map(formatChat)
+
+  // Debug logs state
+  const [showDebugLogs, setShowDebugLogs] = useState(false)
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [newLogCount, setNewLogCount] = useState(0)
+
+  // Subscribe to new logs
+  useEffect(() => {
+    onNewLog = (_entry: LogEntry) => {
+      setLogs([...globalLogs])
+      if (!showDebugLogs) {
+        setNewLogCount(c => c + 1)
+      }
+    }
+    // Load existing logs
+    setLogs([...globalLogs])
+    
+    // Add initial info
+    addLog('info', `Even Messages Debug Console Initialized`, 'info', 
+      `Origin: ${window.location.origin}\nBase API: ${getBeeperConfig()?.baseUrl || 'not configured'}`)
+    
+    return () => {
+      onNewLog = null
+    }
+  }, [])
+
+  // Reset new log count when opening logs
+  const handleToggleLogs = () => {
+    setShowDebugLogs(!showDebugLogs)
+    if (!showDebugLogs) {
+      setNewLogCount(0)
+    }
+  }
+
+  const getLogTypeClass = (type: LogEntry['type']) => {
+    switch (type) {
+      case 'api-request': return styles.logRequest
+      case 'api-response': return styles.logResponse
+      case 'api-error':
+      case 'cors': return styles.logError
+      case 'console': return styles.logConsole
+      default: return styles.logInfo
+    }
+  }
+
+  const getLogIcon = (type: LogEntry['type']) => {
+    switch (type) {
+      case 'api-request': return '>'
+      case 'api-response': return '<'
+      case 'api-error': return '!'
+      case 'cors': return '[X]'
+      default: return '*'
+    }
+  }
 
   return (
     <div className={styles.container}>
@@ -250,8 +466,24 @@ export function DevModeUI({
       {/* Footer */}
       <footer className={styles.footer}>
         <p>Even Messages - Development Mode</p>
-        <p className={styles.apiInfo}>Beeper API: http://localhost:23373</p>
+        <p className={styles.apiInfo}>Beeper API: {getBeeperConfig()?.baseUrl || 'http://localhost:23373'}</p>
+        <button 
+          className={styles.showLogsButton}
+          onClick={handleToggleLogs}
+        >
+          {showDebugLogs ? 'Hide logs' : `Show logs${newLogCount > 0 ? ` (${newLogCount} new)` : ''}`}
+        </button>
       </footer>
+
+      {/* Debug Logs Panel */}
+      {showDebugLogs && (
+        <DebugLogsPanel 
+          logs={logs}
+          onClose={() => setShowDebugLogs(false)}
+          getLogTypeClass={getLogTypeClass}
+          getLogIcon={getLogIcon}
+        />
+      )}
     </div>
   )
 }
@@ -567,6 +799,70 @@ function MessagesView({
           </form>
         </>
       )}
+    </div>
+  )
+}
+
+// Debug Logs Panel Component
+function DebugLogsPanel({ 
+  logs, 
+  onClose,
+  getLogTypeClass,
+  getLogIcon,
+}: { 
+  logs: LogEntry[]
+  onClose: () => void
+  getLogTypeClass: (type: LogEntry['type']) => string
+  getLogIcon: (type: LogEntry['type']) => string
+}) {
+  const logsEndRef = useRef<HTMLDivElement>(null)
+  
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs.length])
+
+  return (
+    <div className={styles.debugPanel}>
+      <div className={styles.debugHeader}>
+        <span className={styles.debugTitle}>Debug Console</span>
+        <div className={styles.debugActions}>
+          <button 
+            className={styles.debugClear}
+            onClick={() => globalLogs.length = 0}
+          >
+            Clear
+          </button>
+          <button className={styles.debugClose} onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+      <div className={styles.debugContent}>
+        {logs.length === 0 ? (
+          <div className={styles.debugEmpty}>No logs yet</div>
+        ) : (
+          logs.map(log => (
+            <div 
+              key={log.id} 
+              className={`${styles.debugEntry} ${getLogTypeClass(log.type)}`}
+            >
+              <span className={styles.logTime}>
+                {formatTimestamp(log.timestamp)}
+              </span>
+              <span className={styles.logIcon}>{getLogIcon(log.type)}</span>
+              <span className={styles.logMessage}>{log.message}</span>
+              {log.details && (
+                <pre className={styles.logDetails}>{log.details}</pre>
+              )}
+            </div>
+          ))
+        )}
+        <div ref={logsEndRef} />
+      </div>
+      <div className={styles.debugFooter}>
+        <span>{logs.length} log entries</span>
+        <span>CORS issues will be highlighted in red</span>
+      </div>
     </div>
   )
 }
