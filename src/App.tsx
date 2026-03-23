@@ -1,7 +1,20 @@
 import { useEffect, useState, useCallback } from 'react'
 import { GlassesUI } from './glasses/GlassesUI'
 import { DevModeUI } from './components/DevModeUI'
-import { BeeperClient, BeeperAccount, BeeperChat, getApiConfig, updateApiConfig, clearApiConfig, saveLastOpenedState, getLastOpenedState, clearLastOpenedState } from './services'
+import {
+  BeeperClient,
+  BeeperAccount,
+  BeeperChat,
+  getApiConfig,
+  getSpeechApiConfig,
+  updateApiConfig,
+  updateSpeechApiConfig,
+  clearApiConfig,
+  saveLastOpenedState,
+  getLastOpenedState,
+  clearLastOpenedState,
+  type SpeechApiConfig,
+} from './services'
 
 /**
  * Even Messages App
@@ -13,7 +26,7 @@ import { BeeperClient, BeeperAccount, BeeperChat, getApiConfig, updateApiConfig,
  */
 export default function App() {
   const [isGlassesConnected, setIsGlassesConnected] = useState(false)
-  const [currentView, setCurrentView] = useState<'accounts' | 'chats' | 'messages'>('accounts')
+  const [currentView, setCurrentView] = useState<'accounts' | 'chats' | 'messages'>('chats')
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null)
   const [selectedChat, setSelectedChat] = useState<string | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
@@ -24,6 +37,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false)
 
   const [apiConfig, setApiConfig] = useState<{ baseUrl: string; token: string } | null>(null)
+  const [speechConfig, setSpeechConfig] = useState<SpeechApiConfig | null>(null)
 
   // Load real data
   const loadRealData = useCallback(async (baseUrl: string, token: string) => {
@@ -65,6 +79,11 @@ export default function App() {
           setIsAuthenticated(true)
           await loadRealData(config.baseUrl, config.token)
         }
+
+        const savedSpeechConfig = await getSpeechApiConfig()
+        if (savedSpeechConfig) {
+          setSpeechConfig(savedSpeechConfig)
+        }
       } catch (err) {
         console.error('[App] Failed to load config:', err)
       } finally {
@@ -78,33 +97,44 @@ export default function App() {
     init()
   }, [])
 
-  // Restore last opened conversation after authentication and data load
+  // Restore last opened conversation after authentication and data load.
+  // Default to the conversations list when nothing can be restored.
   useEffect(() => {
-    if (isAuthenticated && accounts.length > 0 && chats.length > 0) {
-      getLastOpenedState().then(lastState => {
-        if (lastState) {
-          // Only restore if the saved account still exists
-          const accountExists = accounts.some(a => a.accountID === lastState.accountId)
-          if (accountExists) {
-            setSelectedAccount(lastState.accountId)
-            setCurrentView(lastState.view)
-            
-            // For messages view, verify the chat still exists
-            if (lastState.view === 'messages' && lastState.chatId) {
-              const chatExists = chats.some(c => c.id === lastState.chatId)
-              if (chatExists) {
-                setSelectedChat(lastState.chatId)
-              } else {
-                // Chat no longer exists, go back to chats view
-                setSelectedChat(null)
-                setCurrentView('chats')
-              }
-            }
-          }
+    if (!isAuthenticated || accounts.length === 0 || chats.length === 0) return
+
+    getLastOpenedState().then(lastState => {
+      if (!lastState) {
+        setSelectedAccount('all')
+        setSelectedChat(null)
+        setCurrentView('chats')
+        return
+      }
+
+      const requestedAccountId = lastState.accountId ?? 'all'
+      const accountExists = requestedAccountId === 'all' || accounts.some(a => a.accountID === requestedAccountId)
+
+      if (!accountExists) {
+        setSelectedAccount('all')
+        setSelectedChat(null)
+        setCurrentView('chats')
+        return
+      }
+
+      setSelectedAccount(requestedAccountId)
+
+      if (lastState.view === 'messages' && lastState.chatId) {
+        const chatExists = chats.some(c => c.id === lastState.chatId)
+        if (chatExists) {
+          setSelectedChat(lastState.chatId)
+          setCurrentView('messages')
+          return
         }
-      })
-    }
-  }, [isAuthenticated, accounts.length, chats.length])
+      }
+
+      setSelectedChat(null)
+      setCurrentView('chats')
+    })
+  }, [isAuthenticated, accounts, chats])
 
   // Save state when account changes
   useEffect(() => {
@@ -138,6 +168,18 @@ export default function App() {
       await clearApiConfig()
     }
   }, [loadRealData])
+
+  const handleSaveSpeechSettings = useCallback(async (baseUrl: string, token: string, model: string) => {
+    const nextConfig = {
+      baseUrl: baseUrl.trim(),
+      token: token.trim(),
+      model: model.trim(),
+    }
+
+    await updateSpeechApiConfig(nextConfig.baseUrl, nextConfig.token, nextConfig.model)
+    setSpeechConfig(nextConfig)
+    setShowSettings(false)
+  }, [])
 
   const handleLogout = useCallback(async () => {
     setIsAuthenticated(false)
@@ -207,7 +249,7 @@ export default function App() {
   return (
     <>
       {/* Glasses UI - renders nothing but controls the glasses display */}
-      <GlassesUI beeperConfig={apiConfig} />
+      <GlassesUI beeperConfig={apiConfig} speechConfig={speechConfig} />
       
       {/* Web/Dev Mode UI */}
       <DevModeUI
@@ -222,10 +264,12 @@ export default function App() {
         error={error}
         showSettings={showSettings}
         isSettingsDefaultOpen={!isAuthenticated && !isLoading}
+        speechConfig={speechConfig}
         onLogout={handleLogout}
         onOpenSettings={() => setShowSettings(true)}
         onCloseSettings={() => setShowSettings(false)}
         onSaveSettings={handleSaveSettings}
+        onSaveSpeechSettings={handleSaveSpeechSettings}
         onChannelSelect={handleAccountSelect}
         onConversationSelect={handleChatSelect}
         onBack={handleBack}

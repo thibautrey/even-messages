@@ -10,6 +10,9 @@ import { waitForEvenAppBridge, type EvenAppBridge } from '@evenrealities/even_hu
 export interface AppConfig {
   apiBaseUrl?: string
   apiToken?: string
+  speechApiBaseUrl?: string
+  speechApiToken?: string
+  speechApiModel?: string
   lastOpened?: {
     accountId: string | null
     chatId: string | null
@@ -138,6 +141,56 @@ export async function clearApiConfig(): Promise<void> {
   const config = await getConfig()
   delete config.apiBaseUrl
   delete config.apiToken
+  await saveConfig(config)
+}
+
+export interface SpeechApiConfig {
+  baseUrl: string
+  token: string
+  model: string
+}
+
+export async function updateSpeechApiConfig(
+  baseUrl: string,
+  token: string,
+  model: string,
+): Promise<void> {
+  const config = await getConfig()
+  config.speechApiBaseUrl = baseUrl
+  config.speechApiToken = token
+  config.speechApiModel = model
+  await saveConfig(config)
+}
+
+export async function getSpeechApiConfig(): Promise<SpeechApiConfig | null> {
+  const config = await getConfig()
+  if (config.speechApiBaseUrl && config.speechApiToken && config.speechApiModel) {
+    return {
+      baseUrl: config.speechApiBaseUrl,
+      token: config.speechApiToken,
+      model: config.speechApiModel,
+    }
+  }
+  return null
+}
+
+export function getSpeechApiConfigSync(): SpeechApiConfig | null {
+  const config = getConfigSync()
+  if (config.speechApiBaseUrl && config.speechApiToken && config.speechApiModel) {
+    return {
+      baseUrl: config.speechApiBaseUrl,
+      token: config.speechApiToken,
+      model: config.speechApiModel,
+    }
+  }
+  return null
+}
+
+export async function clearSpeechApiConfig(): Promise<void> {
+  const config = await getConfig()
+  delete config.speechApiBaseUrl
+  delete config.speechApiToken
+  delete config.speechApiModel
   await saveConfig(config)
 }
 
