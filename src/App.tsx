@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { GlassesUI } from './glasses/GlassesUI'
 import { DevModeUI } from './components/DevModeUI'
-import { authenticateWithBeeper, BeeperClient, BeeperAccount, BeeperChat, getBeeperConfig, updateBeeperConfig, clearBeeperConfig, saveLastOpenedState, getLastOpenedState, clearLastOpenedState } from './services'
+import { BeeperClient, BeeperAccount, BeeperChat, getApiConfig, updateApiConfig, clearApiConfig, saveLastOpenedState, getLastOpenedState, clearLastOpenedState } from './services'
 
 /**
  * Even Messages App
@@ -17,17 +17,13 @@ export default function App() {
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null)
   const [selectedChat, setSelectedChat] = useState<string | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [accounts, setAccounts] = useState<BeeperAccount[]>([])
   const [chats, setChats] = useState<BeeperChat[]>([])
   const [error, setError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
 
-  // Get Beeper config
-  const beeperConfig = useMemo(() => {
-    const config = getBeeperConfig()
-    return config?.token ? { baseUrl: config.baseUrl, token: config.token } : null
-  }, [isAuthenticated])
+  const [apiConfig, setApiConfig] = useState<{ baseUrl: string; token: string } | null>(null)
 
   // Load real data
   const loadRealData = useCallback(async (baseUrl: string, token: string) => {
@@ -36,7 +32,7 @@ export default function App() {
     try {
       // Test connection
       const info = await client.getInfo()
-      console.log('[App] Connected to Beeper:', info.app?.version)
+      console.log('[App] Connected to API:', info.app?.version)
       
       // Load accounts
       const accts = await client.listAccounts()
@@ -51,49 +47,62 @@ export default function App() {
       setError(null)
     } catch (err) {
       console.error('[App] Failed to load data:', err)
-      setError('Failed to connect to Beeper. Check your settings.')
+      setError('Failed to connect to API. Check your settings.')
       setIsAuthenticated(false)
-      clearBeeperConfig()
+      setApiConfig(null)
+      await clearApiConfig()
     }
   }, [])
 
-  // Initialize on mount
+  // Initialize on mount - check for stored config
   useEffect(() => {
-    // Check for stored Beeper config
-    const config = getBeeperConfig()
-    if (config?.token) {
-      setIsAuthenticated(true)
-      loadRealData(config.baseUrl, config.token)
+    async function init() {
+      try {
+        // Check for stored API config
+        const config = await getApiConfig()
+        if (config?.token) {
+          setApiConfig(config)
+          setIsAuthenticated(true)
+          await loadRealData(config.baseUrl, config.token)
+        }
+      } catch (err) {
+        console.error('[App] Failed to load config:', err)
+      } finally {
+        setIsLoading(false)
+      }
+      
+      // Mark glasses as connected (they'll be connected when running in Even App)
+      setIsGlassesConnected(true)
     }
     
-    // Mark glasses as connected (they'll be connected when running in Even App)
-    setIsGlassesConnected(true)
+    init()
   }, [])
 
   // Restore last opened conversation after authentication and data load
   useEffect(() => {
     if (isAuthenticated && accounts.length > 0 && chats.length > 0) {
-      const lastState = getLastOpenedState()
-      if (lastState) {
-        // Only restore if the saved account still exists
-        const accountExists = accounts.some(a => a.accountID === lastState.accountId)
-        if (accountExists) {
-          setSelectedAccount(lastState.accountId)
-          setCurrentView(lastState.view)
-          
-          // For messages view, verify the chat still exists
-          if (lastState.view === 'messages' && lastState.chatId) {
-            const chatExists = chats.some(c => c.id === lastState.chatId)
-            if (chatExists) {
-              setSelectedChat(lastState.chatId)
-            } else {
-              // Chat no longer exists, go back to chats view
-              setSelectedChat(null)
-              setCurrentView('chats')
+      getLastOpenedState().then(lastState => {
+        if (lastState) {
+          // Only restore if the saved account still exists
+          const accountExists = accounts.some(a => a.accountID === lastState.accountId)
+          if (accountExists) {
+            setSelectedAccount(lastState.accountId)
+            setCurrentView(lastState.view)
+            
+            // For messages view, verify the chat still exists
+            if (lastState.view === 'messages' && lastState.chatId) {
+              const chatExists = chats.some(c => c.id === lastState.chatId)
+              if (chatExists) {
+                setSelectedChat(lastState.chatId)
+              } else {
+                // Chat no longer exists, go back to chats view
+                setSelectedChat(null)
+                setCurrentView('chats')
+              }
             }
           }
         }
-      }
+      })
     }
   }, [isAuthenticated, accounts.length, chats.length])
 
@@ -108,30 +117,10 @@ export default function App() {
     }
   }, [selectedAccount, selectedChat, currentView, isAuthenticated])
 
-  const handleLogin = useCallback(async () => {
-    setIsAuthenticating(true)
-    setError(null)
-    
-    try {
-      const newToken = await authenticateWithBeeper()
-      if (newToken) {
-        const config = getBeeperConfig()
-        const baseUrl = config?.baseUrl || 'http://localhost:23373'
-        updateBeeperConfig(baseUrl, newToken)
-        setIsAuthenticated(true)
-        await loadRealData(baseUrl, newToken)
-      }
-    } catch (err) {
-      console.error('[App] Authentication failed:', err)
-      setError('Authentication failed. Please try again.')
-    } finally {
-      setIsAuthenticating(false)
-    }
-  }, [loadRealData])
-
   const handleSaveSettings = useCallback(async (baseUrl: string, token: string) => {
     setError(null)
-    updateBeeperConfig(baseUrl, token)
+    await updateApiConfig(baseUrl, token)
+    setApiConfig({ baseUrl, token })
     setShowSettings(false)
     
     try {
@@ -145,19 +134,21 @@ export default function App() {
       console.error('[App] Connection failed:', err)
       setError('Failed to connect. Check URL and token.')
       setIsAuthenticated(false)
-      clearBeeperConfig()
+      setApiConfig(null)
+      await clearApiConfig()
     }
   }, [loadRealData])
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
     setIsAuthenticated(false)
     setAccounts([])
     setChats([])
     setSelectedAccount(null)
     setSelectedChat(null)
     setCurrentView('accounts')
-    clearBeeperConfig()
-    clearLastOpenedState()
+    setApiConfig(null)
+    await clearApiConfig()
+    await clearLastOpenedState()
   }, [])
 
   const handleAccountSelect = useCallback((id: string) => {
@@ -196,10 +187,9 @@ export default function App() {
   }, [currentView])
 
   const handleSendMessage = useCallback(async (content: string) => {
-    const config = getBeeperConfig()
-    if (!config?.token || !selectedChat) return
+    if (!apiConfig?.token || !selectedChat) return
     
-    const client = new BeeperClient(config)
+    const client = new BeeperClient(apiConfig)
     try {
       await client.sendMessage(selectedChat, { text: content })
       console.log('[App] Message sent:', content)
@@ -207,7 +197,7 @@ export default function App() {
       console.error('[App] Failed to send message:', err)
       setError('Failed to send message')
     }
-  }, [selectedChat])
+  }, [apiConfig, selectedChat])
 
   // Filter chats by selected account
   const filteredChats = selectedAccount && selectedAccount !== 'all'
@@ -217,7 +207,7 @@ export default function App() {
   return (
     <>
       {/* Glasses UI - renders nothing but controls the glasses display */}
-      <GlassesUI beeperConfig={beeperConfig} />
+      <GlassesUI beeperConfig={apiConfig} />
       
       {/* Web/Dev Mode UI */}
       <DevModeUI
@@ -226,12 +216,12 @@ export default function App() {
         selectedChannel={selectedAccount}
         selectedConversation={selectedChat}
         isAuthenticated={isAuthenticated}
-        isAuthenticating={isAuthenticating}
+        isLoading={isLoading}
         accounts={accounts}
         chats={filteredChats}
         error={error}
         showSettings={showSettings}
-        onLogin={handleLogin}
+        isSettingsDefaultOpen={!isAuthenticated && !isLoading}
         onLogout={handleLogout}
         onOpenSettings={() => setShowSettings(true)}
         onCloseSettings={() => setShowSettings(false)}

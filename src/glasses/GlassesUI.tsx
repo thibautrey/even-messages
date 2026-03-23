@@ -23,7 +23,8 @@ import { buildHeaderLine } from "even-toolkit/text-utils";
 import { line } from "even-toolkit/types";
 import { useFlashPhase } from "even-toolkit/useFlashPhase";
 import { useGlasses } from "even-toolkit/useGlasses";
-import { waitForEvenAppBridge, type EvenAppBridge } from "@evenrealities/even_hub_sdk";
+import { waitForEvenAppBridge, type EvenAppBridge, type EvenHubEvent } from "@evenrealities/even_hub_sdk";
+import { getServiceIcon } from "./platformIcons";
 
 // ═══════════════════════════════════════════════════════════════
 // DISPLAY CONSTANTS
@@ -65,13 +66,12 @@ async function getBridge(): Promise<EvenAppBridge | null> {
 const ICONS = {
   SELECTED: ">",
   BACK: "<",
-  DIRECT: "[Direct]",
-  GROUP: "[Group]",
   UNREAD: "[!",
 };
 
 // Quick reply presets (2 columns x 4 rows = 8 replies)
 const QUICK_REPLIES = [
+  "Voice",
   "Got it",
   "OK",
   "Thanks!",
@@ -149,7 +149,7 @@ function sep(): DisplayLine {
 // TYPES
 // ═══════════════════════════════════════════════════════════════
 
-type Screen = "accounts" | "chats" | "messages" | "quickReply";
+type Screen = "accounts" | "chats" | "messages" | "quickReply" | "voiceReply";
 
 interface AppState {
   accounts: BeeperAccount[];
@@ -163,7 +163,27 @@ interface AppState {
   isLoading: boolean;
   messageScrollOffset: number; // For scrolling through messages
   demoMode: boolean; // Easter egg: force demo mode with fake data
+  voiceStatus: string | null;
+  voiceAudioBytes: number;
 }
+
+interface BrowserSpeechRecognitionEvent {
+  results: SpeechRecognitionResultList;
+}
+
+type BrowserSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
 // Demo mode trigger: 5 clicks within 1 second
 const DEMO_MODE_CLICKS = 5;
@@ -297,17 +317,6 @@ function formatTime(timestamp: string): string {
     .slice(0, 5);
 }
 
-function getServiceIcon(accountId: string): string {
-  const icons: Record<string, string> = {
-    whatsapp: "[W]",
-    signal: "[S]",
-    telegram: "[T]",
-    matrix: "[M]",
-    beeper: "[B]",
-  };
-  return icons[accountId] || "[*]";
-}
-
 function getMaxIndex(state: AppState): number {
   switch (state.currentScreen) {
     case "accounts": {
@@ -320,7 +329,20 @@ function getMaxIndex(state: AppState): number {
       return Math.max(0, state.messages.length - 1);
     case "quickReply":
       return QUICK_REPLIES.length; // +1 for Cancel
+    case "voiceReply":
+      return 0;
   }
+}
+
+function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+
+  const speechWindow = window as Window & {
+    SpeechRecognition?: BrowserSpeechRecognitionCtor;
+    webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
+  };
+
+  return speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition || null;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -406,16 +428,15 @@ function buildChatsDisplay(
     visible.forEach((chat, _i) => {
       const globalIdx = start + visible.indexOf(chat);
       const isSelected = globalIdx === highlightedIdx;
-      const typeIcon = chat.type === "group" ? ICONS.GROUP : ICONS.DIRECT;
 
-      // Format: > [D] Contact Name..............[!2]
-      const name = truncateName(chat.title, 26);
-      const namePadded = padRight(name, 26);
+      // Format: > Contact Name..............[!2]
+      const name = truncateName(chat.title, 28);
+      const namePadded = padRight(name, 28);
       const suffix =
         chat.unreadCount > 0 ? `${ICONS.UNREAD}${chat.unreadCount}]` : "";
       const suffixPadded = padRight(suffix, 6);
 
-      const lineText = `${isSelected ? ICONS.SELECTED : " "} ${typeIcon} ${namePadded}${suffixPadded}`;
+      const lineText = `${isSelected ? ICONS.SELECTED : " "} ${namePadded}${suffixPadded}`;
       lines.push(line(lineText, isSelected ? "inverted" : "normal"));
     });
   }
@@ -561,18 +582,13 @@ function buildQuickReplyDisplay(
     : "Unknown";
   lines.push(line(buildHeaderLine(`Reply: ${sender}`, ""), "inverted"));
 
-  // Quick replies in 2 columns
-  // Format: "Got it"    "OK"
-  const start = Math.floor(highlightedIdx / 2) * 2;
-  const visibleReplies = QUICK_REPLIES.slice(start, start + 6);
-
-  for (let i = 0; i < visibleReplies.length; i += 2) {
-    const reply1 = visibleReplies[i] || "";
-    const reply2 = visibleReplies[i + 1] || "";
-    const idx1 = start + i;
-    const idx2 = start + i + 1;
-    const isSel1 = idx1 === highlightedIdx;
-    const isSel2 = idx2 === highlightedIdx;
+  // Quick replies in 2 columns.
+  // Keep the list fixed and only move the selection marker.
+  for (let i = 0; i < QUICK_REPLIES.length; i += 2) {
+    const reply1 = QUICK_REPLIES[i] || "";
+    const reply2 = QUICK_REPLIES[i + 1] || "";
+    const isSel1 = i === highlightedIdx;
+    const isSel2 = i + 1 === highlightedIdx;
 
     const sel1 = isSel1 ? ICONS.SELECTED : " ";
     const sel2 = isSel2 ? ICONS.SELECTED : " ";
@@ -586,6 +602,22 @@ function buildQuickReplyDisplay(
   const isCancelSelected = highlightedIdx >= QUICK_REPLIES.length;
   const cancelBar = buildStaticActionBar(["Cancel"], isCancelSelected ? 0 : -1);
   lines.push(line(cancelBar, "meta"));
+
+  return lines;
+}
+
+function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
+  const lines: DisplayLine[] = [];
+  const msg = state.messages[state.selectedMessageIndex];
+  const sender = msg
+    ? truncateName(msg.senderName || "Unknown", 16)
+    : "Unknown";
+
+  lines.push(line(buildHeaderLine(`Voice: ${sender}`, ""), "inverted"));
+  lines.push(line("Listening...", "normal"));
+  lines.push(line(truncate(state.voiceStatus || "Speak now", 38), "normal"));
+  lines.push(sep());
+  lines.push(line(buildStaticActionBar(["Cancel"], 0), "meta"));
 
   return lines;
 }
@@ -761,10 +793,15 @@ export function GlassesUI({
     isLoading: true,
     messageScrollOffset: 0,
     demoMode: false,
+    voiceStatus: null,
+    voiceAudioBytes: 0,
   });
 
   // Ref to store saved state for use in effects
   const savedStateRef = useRef<SavedState>({ selectedAccount: null, selectedChat: null });
+  const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const isVoiceCancelledRef = useRef<boolean>(false);
+  const evenHubUnsubscribeRef = useRef<(() => void) | null>(null);
 
   // Ref for WebSocket connection
   const wsRef = useRef<WebSocket | null>(null);
@@ -775,6 +812,128 @@ export function GlassesUI({
   const suppressReloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const beeper = beeperConfig ? new BeeperClient(beeperConfig) : null;
+
+  const stopVoiceReply = useCallback(async (cancelled = false) => {
+    isVoiceCancelledRef.current = cancelled;
+
+    if (speechRecognitionRef.current) {
+      const recognition = speechRecognitionRef.current;
+      speechRecognitionRef.current = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.onend = null;
+      recognition.stop();
+    }
+
+    if (evenHubUnsubscribeRef.current) {
+      evenHubUnsubscribeRef.current();
+      evenHubUnsubscribeRef.current = null;
+    }
+
+    const bridge = await getBridge();
+    if (bridge) {
+      try {
+        await bridge.audioControl(false);
+      } catch (e) {
+        console.warn("[GlassesUI] Failed to close microphone:", e);
+      }
+    }
+  }, []);
+
+  const startVoiceReply = useCallback(async () => {
+    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
+    if (!SpeechRecognitionCtor) {
+      setState((s) => ({
+        ...s,
+        currentScreen: "quickReply",
+        voiceStatus: "Speech not supported",
+        voiceAudioBytes: 0,
+      }));
+      return;
+    }
+
+    isVoiceCancelledRef.current = false;
+    setState((s) => ({
+      ...s,
+      currentScreen: "voiceReply",
+      voiceStatus: "Speak now",
+      voiceAudioBytes: 0,
+    }));
+
+    const bridge = await getBridge();
+    if (bridge) {
+      try {
+        evenHubUnsubscribeRef.current = bridge.onEvenHubEvent((event: EvenHubEvent) => {
+          if (event.listEvent) {
+            console.log("[GlassesUI] List selected:", event.listEvent.currentSelectItemName);
+          } else if (event.textEvent) {
+            console.log("[GlassesUI] Text event:", event.textEvent);
+          } else if (event.sysEvent) {
+            console.log("[GlassesUI] System event:", event.sysEvent.eventType);
+          } else if (event.audioEvent) {
+            const pcm = event.audioEvent.audioPcm;
+            const pcmLength = pcm?.length || 0;
+            console.log("[GlassesUI] Audio PCM length:", pcmLength);
+            setState((s) => ({
+              ...s,
+              voiceAudioBytes: s.voiceAudioBytes + pcmLength,
+            }));
+          }
+        });
+        await bridge.audioControl(true);
+      } catch (e) {
+        console.warn("[GlassesUI] Failed to open microphone:", e);
+      }
+    }
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      const result = event.results[event.results.length - 1];
+      const transcript = result?.[0]?.transcript?.trim() || "";
+      if (!transcript) return;
+
+      setState((s) => ({ ...s, voiceStatus: transcript }));
+
+      if (result.isFinal) {
+        stopVoiceReply(false);
+        sendMessage(transcript);
+        setState((s) => ({
+          ...s,
+          currentScreen: "messages",
+          highlightedIndex: 0,
+          voiceStatus: null,
+          voiceAudioBytes: 0,
+        }));
+      }
+    };
+
+    recognition.onerror = (event) => {
+      const errorMessage = event.error || "Voice failed";
+      stopVoiceReply(false);
+      setState((s) => ({
+        ...s,
+        currentScreen: "quickReply",
+        voiceStatus: errorMessage,
+        voiceAudioBytes: 0,
+      }));
+    };
+
+    recognition.onend = () => {
+      speechRecognitionRef.current = null;
+      if (isVoiceCancelledRef.current) {
+        setState((s) => ({ ...s, voiceStatus: null, voiceAudioBytes: 0 }));
+        return;
+      }
+    };
+
+    speechRecognitionRef.current = recognition;
+    recognition.start();
+  }, [stopVoiceReply]);
 
   // Flash phase for blinking action indicators
   const flashPhase = useFlashPhase(true);
@@ -1040,6 +1199,12 @@ export function GlassesUI({
     };
   }, [beeper, state.demoMode, state.selectedChat, state.selectedAccount]);
 
+  useEffect(() => {
+    return () => {
+      stopVoiceReply(true);
+    };
+  }, [stopVoiceReply]);
+
   // Persist state changes to storage
   useEffect(() => {
     const persistState = async () => {
@@ -1111,13 +1276,32 @@ export function GlassesUI({
         case "quickReply": {
           if (highlightedIndex < QUICK_REPLIES.length) {
             const reply = QUICK_REPLIES[highlightedIndex];
-            sendMessage(reply);
-            updates.currentScreen = "messages";
-            updates.highlightedIndex = 0;
+            if (reply === "Voice") {
+              updates.currentScreen = "voiceReply";
+              updates.voiceStatus = "Starting mic...";
+              updates.voiceAudioBytes = 0;
+              startVoiceReply();
+            } else {
+              sendMessage(reply);
+              updates.currentScreen = "messages";
+              updates.highlightedIndex = 0;
+              updates.voiceStatus = null;
+              updates.voiceAudioBytes = 0;
+            }
           } else {
             // Cancel - go back
             updates.currentScreen = "messages";
+            updates.voiceStatus = null;
+            updates.voiceAudioBytes = 0;
           }
+          break;
+        }
+
+        case "voiceReply": {
+          stopVoiceReply(true);
+          updates.currentScreen = "quickReply";
+          updates.voiceStatus = null;
+          updates.voiceAudioBytes = 0;
           break;
         }
       }
@@ -1146,11 +1330,19 @@ export function GlassesUI({
         break;
       case "quickReply":
         updates.currentScreen = "messages";
+        updates.voiceStatus = null;
+        updates.voiceAudioBytes = 0;
+        break;
+      case "voiceReply":
+        stopVoiceReply(true);
+        updates.currentScreen = "quickReply";
+        updates.voiceStatus = null;
+        updates.voiceAudioBytes = 0;
         break;
     }
 
     return updates;
-  }, []);
+  }, [stopVoiceReply]);
 
   // Load chats
   function loadChats(accountId: string | null) {
@@ -1291,6 +1483,9 @@ export function GlassesUI({
           break;
         case "quickReply":
           lines = buildQuickReplyDisplay(snapshot, nav.highlightedIndex);
+          break;
+        case "voiceReply":
+          lines = buildVoiceReplyDisplay(snapshot);
           break;
         default:
           lines = [line("Even Messages", "inverted")];

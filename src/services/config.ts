@@ -1,14 +1,15 @@
 /**
  * App Configuration
  * 
- * Manages configuration including Beeper API settings.
+ * Manages configuration including API settings.
+ * Uses Even SDK storage when available, with localStorage fallback for development.
  */
 
+import { waitForEvenAppBridge, type EvenAppBridge } from '@evenrealities/even_hub_sdk'
+
 export interface AppConfig {
-  beeper?: {
-    baseUrl: string
-    token: string
-  }
+  apiBaseUrl?: string
+  apiToken?: string
   lastOpened?: {
     accountId: string | null
     chatId: string | null
@@ -18,110 +19,189 @@ export interface AppConfig {
 
 const CONFIG_KEY = 'even-messages-config'
 
+// Bridge instance for storage
+let bridgeInstance: EvenAppBridge | null = null
+
+async function getBridge(): Promise<EvenAppBridge | null> {
+  if (bridgeInstance) return bridgeInstance
+  try {
+    bridgeInstance = await waitForEvenAppBridge()
+    return bridgeInstance
+  } catch (e) {
+    console.warn('[Config] Failed to get Even bridge:', e)
+    return null
+  }
+}
+
 /**
- * Get current configuration
+ * Get current configuration from Even SDK storage (with localStorage fallback)
  */
-export function getConfig(): AppConfig {
+export async function getConfig(): Promise<AppConfig> {
+  try {
+    const bridge = await getBridge()
+    if (bridge) {
+      const stored = await bridge.getLocalStorage(CONFIG_KEY)
+      if (stored) {
+        return JSON.parse(stored)
+      }
+    }
+  } catch (e) {
+    console.warn('[Config] Failed to get config from Even SDK:', e)
+  }
+  
+  // Fallback to localStorage for development
   try {
     const stored = localStorage.getItem(CONFIG_KEY)
     if (stored) {
       return JSON.parse(stored)
     }
   } catch (e) {
-    console.error('[Config] Failed to parse config:', e)
+    console.error('[Config] Failed to parse localStorage config:', e)
+  }
+  
+  return {}
+}
+
+/**
+ * Get config synchronously (localStorage only - for non-async contexts)
+ */
+export function getConfigSync(): AppConfig {
+  try {
+    const stored = localStorage.getItem(CONFIG_KEY)
+    if (stored) {
+      return JSON.parse(stored)
+    }
+  } catch (e) {
+    console.error('[Config] Failed to parse localStorage config:', e)
   }
   return {}
 }
 
 /**
- * Save configuration
+ * Save configuration to Even SDK storage (with localStorage fallback)
  */
-export function saveConfig(config: AppConfig): void {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
+export async function saveConfig(config: AppConfig): Promise<void> {
+  const data = JSON.stringify(config)
+  
+  try {
+    const bridge = await getBridge()
+    if (bridge) {
+      await bridge.setLocalStorage(CONFIG_KEY, data)
+      console.log('[Config] Saved to Even SDK storage')
+      return
+    }
+  } catch (e) {
+    console.warn('[Config] Failed to save to Even SDK, using fallback:', e)
+  }
+  
+  // Fallback to localStorage
+  localStorage.setItem(CONFIG_KEY, data)
+  console.log('[Config] Saved to localStorage (fallback)')
 }
 
 /**
- * Update Beeper configuration
+ * Update API configuration (base URL and token)
  */
-export function updateBeeperConfig(baseUrl: string, token: string): void {
-  const config = getConfig()
-  config.beeper = { baseUrl, token }
-  saveConfig(config)
+export async function updateApiConfig(baseUrl: string, token: string): Promise<void> {
+  const config = await getConfig()
+  config.apiBaseUrl = baseUrl
+  config.apiToken = token
+  await saveConfig(config)
 }
 
 /**
- * Get Beeper configuration
+ * Get API configuration
  */
-export function getBeeperConfig(): { baseUrl: string; token: string } | null {
-  const config = getConfig()
-  if (config.beeper?.baseUrl && config.beeper?.token) {
-    return config.beeper
+export async function getApiConfig(): Promise<{ baseUrl: string; token: string } | null> {
+  const config = await getConfig()
+  if (config.apiBaseUrl && config.apiToken) {
+    return { baseUrl: config.apiBaseUrl, token: config.apiToken }
   }
   return null
 }
 
 /**
- * Clear Beeper configuration
+ * Get API config synchronously (localStorage only)
  */
-export function clearBeeperConfig(): void {
-  const config = getConfig()
-  delete config.beeper
-  saveConfig(config)
-}
-
-/**
- * Get stored Beeper token only
- */
-export function getStoredToken(): string | null {
-  return getConfig().beeper?.token || null
-}
-
-/**
- * Store Beeper token
- */
-export function storeToken(token: string): void {
-  const config = getConfig()
-  if (!config.beeper) {
-    config.beeper = { baseUrl: 'http://localhost:23373', token }
-  } else {
-    config.beeper.token = token
+export function getApiConfigSync(): { baseUrl: string; token: string } | null {
+  const config = getConfigSync()
+  if (config.apiBaseUrl && config.apiToken) {
+    return { baseUrl: config.apiBaseUrl, token: config.apiToken }
   }
-  saveConfig(config)
+  return null
 }
 
 /**
- * Clear stored token
+ * Clear API configuration
  */
-export function clearToken(): void {
-  const config = getConfig()
-  if (config.beeper) {
-    config.beeper.token = ''
-    saveConfig(config)
-  }
+export async function clearApiConfig(): Promise<void> {
+  const config = await getConfig()
+  delete config.apiBaseUrl
+  delete config.apiToken
+  await saveConfig(config)
 }
 
 /**
  * Save the last opened conversation state
  */
-export function saveLastOpenedState(state: { accountId: string | null; chatId: string | null; view: 'accounts' | 'chats' | 'messages' }): void {
-  const config = getConfig()
+export async function saveLastOpenedState(state: { accountId: string | null; chatId: string | null; view: 'accounts' | 'chats' | 'messages' }): Promise<void> {
+  const config = await getConfig()
   config.lastOpened = state
-  saveConfig(config)
+  await saveConfig(config)
 }
 
 /**
  * Get the last opened conversation state
  */
-export function getLastOpenedState(): { accountId: string | null; chatId: string | null; view: 'accounts' | 'chats' | 'messages' } | null {
-  const config = getConfig()
+export async function getLastOpenedState(): Promise<{ accountId: string | null; chatId: string | null; view: 'accounts' | 'chats' | 'messages' } | null> {
+  const config = await getConfig()
   return config.lastOpened || null
 }
 
 /**
  * Clear the last opened conversation state
  */
-export function clearLastOpenedState(): void {
-  const config = getConfig()
+export async function clearLastOpenedState(): Promise<void> {
+  const config = await getConfig()
   delete config.lastOpened
-  saveConfig(config)
+  await saveConfig(config)
+}
+
+// Legacy compatibility - these sync functions are used in DevModeUI for display only
+// The actual storage now uses async Even SDK methods
+export function getBeeperConfig(): { baseUrl: string; token: string } | null {
+  return getApiConfigSync()
+}
+
+export const getStoredToken = (): string | null => getApiConfigSync()?.token || null
+
+export async function storeToken(token: string): Promise<void> {
+  const config = await getConfig()
+  config.apiToken = token
+  await saveConfig(config)
+}
+
+export function clearBeeperConfig(): void {
+  // Keep legacy sync behavior for development fallback reads.
+  try {
+    const stored = localStorage.getItem(CONFIG_KEY)
+    if (!stored) return
+
+    const config = JSON.parse(stored)
+    delete config.apiBaseUrl
+    delete config.apiToken
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(config))
+  } catch (e) {
+    console.error('[Config] Failed to clear config:', e)
+  }
+}
+
+export async function clearToken(): Promise<void> {
+  const config = await getConfig()
+  delete config.apiToken
+  await saveConfig(config)
+}
+
+export async function updateBeeperConfig(baseUrl: string, token: string): Promise<void> {
+  await updateApiConfig(baseUrl, token)
 }

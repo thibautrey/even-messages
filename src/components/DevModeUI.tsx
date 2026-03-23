@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { BeeperAccount, BeeperChat, getBeeperConfig } from '../services'
+import { PlatformIcon } from './PlatformIcon'
 import styles from './DevModeUI.module.css'
 
 // Debug logging system
@@ -184,12 +185,12 @@ interface DevModeUIProps {
   selectedChannel: string | null
   selectedConversation: string | null
   isAuthenticated?: boolean
-  isAuthenticating?: boolean
+  isLoading?: boolean
   accounts?: BeeperAccount[]
   chats?: BeeperChat[]
   error?: string | null
   showSettings?: boolean
-  onLogin?: () => void
+  isSettingsDefaultOpen?: boolean
   onLogout?: () => void
   onOpenSettings?: () => void
   onCloseSettings?: () => void
@@ -208,12 +209,11 @@ export function DevModeUI({
   selectedChannel,
   selectedConversation,
   isAuthenticated = false,
-  isAuthenticating = false,
+  isLoading = false,
   accounts = [],
   chats = [],
   error,
   showSettings = false,
-  onLogin,
   onLogout,
   onOpenSettings,
   onCloseSettings,
@@ -226,9 +226,8 @@ export function DevModeUI({
   // Format chat for display
   const formatChat = (chat: BeeperChat) => {
     const unread = chat.unreadCount > 0 ? ` (${chat.unreadCount})` : ''
-    const group = chat.type === 'group' ? '[G]' : '[D]'
     const title = chat.title.length > 25 ? chat.title.slice(0, 25) + '...' : chat.title
-    return { ...chat, displayName: `${group} ${title}${unread}` }
+    return { ...chat, displayName: `${title}${unread}` }
   }
 
   const displayedChats = chats.map(formatChat)
@@ -298,7 +297,7 @@ export function DevModeUI({
           </span>
           {isAuthenticated && (
             <span className={styles.beeperStatus}>
-              Beeper Connected
+              API Connected
             </span>
           )}
           <button className={styles.settingsButton} onClick={onOpenSettings}>
@@ -325,36 +324,38 @@ export function DevModeUI({
 
       {/* Main Content */}
       <main className={styles.main}>
-        {!isAuthenticated ? (
-          /* Login View */
+        {!isAuthenticated && !isLoading && (
+          /* Settings Form - always visible when not authenticated */
           <div className={styles.loginSection}>
             <div className={styles.loginCard}>
-              <h2>Connect to Beeper</h2>
+              <h2>API Configuration</h2>
               <p>
-                Authenticate with your Beeper account to access messages from WhatsApp, Signal, Telegram, and more.
+                Enter your API base URL and token to connect to your messaging service.
               </p>
-              <button
-                className={styles.loginButton}
-                onClick={onLogin}
-                disabled={isAuthenticating}
-              >
-                {isAuthenticating ? 'Opening browser...' : 'Login with Beeper'}
-              </button>
-              <p className={styles.loginHint}>
-                This will open Beeper in your browser for authentication.
-              </p>
-              <div className={styles.divider}>
-                <span>or</span>
+              <div className={styles.instructions}>
+                <p><strong>To get your token:</strong></p>
+                <ol>
+                  <li>Open the <strong>Beeper Desktop App</strong></li>
+                  <li>Go to <strong>Settings</strong> → <strong>Developer Mode</strong></li>
+                  <li>Start the <strong>Development Server</strong></li>
+                  <li>Scroll to the bottom of the developer page and <strong>create a token</strong></li>
+                </ol>
               </div>
-              <button
-                className={styles.manualButton}
-                onClick={onOpenSettings}
-              >
-                Enter API URL and Token Manually
-              </button>
+              <SettingsForm onSave={onSaveSettings!} />
             </div>
           </div>
-        ) : (
+        )}
+        
+        {isLoading && (
+          <div className={styles.loginSection}>
+            <div className={styles.loginCard}>
+              <h2>Loading...</h2>
+              <p>Checking for saved configuration...</p>
+            </div>
+          </div>
+        )}
+        
+        {isAuthenticated && (
           <>
             {/* Navigation */}
             <nav className={styles.breadcrumb}>
@@ -405,7 +406,7 @@ export function DevModeUI({
                     className={styles.listItem}
                     onClick={() => onChannelSelect(account.accountID)}
                   >
-                    <span className={styles.icon}></span>
+                    <PlatformIcon platformId={account.accountID} size={20} className={styles.icon} />
                     <div className={styles.accountInfo}>
                       <span className={styles.name}>
                         {account.user.fullName || account.user.username || 'Unknown'}
@@ -421,7 +422,7 @@ export function DevModeUI({
                   className={`${styles.listItem} ${styles.allChats}`}
                   onClick={() => onChannelSelect('all')}
                 >
-                  <span className={styles.icon}></span>
+                  <PlatformIcon platformId="beeper" size={20} className={styles.icon} />
                   <div className={styles.accountInfo}>
                     <span className={styles.name}>All Chats</span>
                     <span className={styles.accountId}>{chats.length} conversations</span>
@@ -448,7 +449,7 @@ export function DevModeUI({
                       className={styles.listItem}
                       onClick={() => onConversationSelect(chat.id)}
                     >
-                      <span className={styles.icon}>{chat.type === 'group' ? 'G' : 'D'}</span>
+                      <PlatformIcon platformId={chat.accountID} size={20} className={styles.icon} />
                       <div className={styles.convInfo}>
                         <span className={styles.name}>{chat.title}</span>
                         <span className={styles.preview}>
@@ -502,7 +503,71 @@ export function DevModeUI({
   )
 }
 
-// Settings Modal Component
+// Settings Form Component (for inline use)
+function SettingsForm({ onSave }: { onSave: (baseUrl: string, token: string) => void; defaultOpen?: boolean }) {
+  const savedConfig = getBeeperConfig()
+  const [baseUrl, setBaseUrl] = useState(savedConfig?.baseUrl || 'http://localhost:23373')
+  const [token, setToken] = useState(savedConfig?.token || '')
+  const [showToken, setShowToken] = useState(false)
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (baseUrl.trim() && token.trim()) {
+      onSave(baseUrl.trim(), token.trim())
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className={styles.settingsForm}>
+      <div className={styles.formGroup}>
+        <label htmlFor="baseUrl">API Base URL</label>
+        <input
+          id="baseUrl"
+          type="url"
+          value={baseUrl}
+          onChange={e => setBaseUrl(e.target.value)}
+          placeholder="http://localhost:23373"
+          required
+        />
+        <span className={styles.hint}>
+          The base URL of your messaging API server
+        </span>
+      </div>
+      
+      <div className={styles.formGroup}>
+        <label htmlFor="token">API Token</label>
+        <div className={styles.tokenInputWrapper}>
+          <input
+            id="token"
+            type={showToken ? 'text' : 'password'}
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            placeholder="Enter your API token"
+            required
+          />
+          <button
+            type="button"
+            className={styles.toggleToken}
+            onClick={() => setShowToken(!showToken)}
+          >
+            {showToken ? 'Hide' : 'Show'}
+          </button>
+        </div>
+        <span className={styles.hint}>
+          Paste your API token from Beeper's Developer Mode
+        </span>
+      </div>
+      
+      <div className={styles.formActions}>
+        <button type="submit" className={styles.loginButton}>
+          Connect
+        </button>
+      </div>
+    </form>
+  )
+}
+
+// Settings Modal Component (for modal overlay use)
 function SettingsModal({ onSave, onClose }: { onSave: (baseUrl: string, token: string) => void; onClose: () => void }) {
   const savedConfig = getBeeperConfig()
   const [baseUrl, setBaseUrl] = useState(savedConfig?.baseUrl || 'http://localhost:23373')
@@ -526,7 +591,7 @@ function SettingsModal({ onSave, onClose }: { onSave: (baseUrl: string, token: s
         
         <form onSubmit={handleSubmit} className={styles.modalBody}>
           <div className={styles.formGroup}>
-            <label htmlFor="baseUrl">Beeper API URL</label>
+            <label htmlFor="baseUrl">API Base URL</label>
             <input
               id="baseUrl"
               type="url"
@@ -536,7 +601,7 @@ function SettingsModal({ onSave, onClose }: { onSave: (baseUrl: string, token: s
               required
             />
             <span className={styles.hint}>
-              The base URL of the Beeper Desktop API server
+              The base URL of your messaging API server
             </span>
           </div>
           
@@ -548,7 +613,7 @@ function SettingsModal({ onSave, onClose }: { onSave: (baseUrl: string, token: s
                 type={showToken ? 'text' : 'password'}
                 value={token}
                 onChange={e => setToken(e.target.value)}
-                placeholder="Enter your Beeper API token"
+                placeholder="Enter your API token"
                 required
               />
               <button
@@ -560,7 +625,7 @@ function SettingsModal({ onSave, onClose }: { onSave: (baseUrl: string, token: s
               </button>
             </div>
             <span className={styles.hint}>
-              Get your token from Beeper Desktop settings or OAuth flow
+              Paste your API token from Beeper's Developer Mode
             </span>
           </div>
           

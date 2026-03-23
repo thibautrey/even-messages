@@ -5,10 +5,8 @@
  * Opens browser for user authorization, then exchanges code for token.
  */
 
-import { getConfig } from './config'
-
 function getBaseUrl(): string {
-  return getConfig().beeper?.baseUrl || 'http://localhost:23373'
+  return 'http://localhost:23373'
 }
 
 const CLIENT_ID = 'even-messages'

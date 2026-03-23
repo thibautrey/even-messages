@@ -86,6 +86,41 @@
   line-height: 1.6;
 }
 
+.instructions {
+  background: #1f1f3a;
+  border: 1px solid #3d3d5a;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+
+.instructions p {
+  margin: 0 0 0.75rem;
+  color: #fff;
+  font-size: 0.875rem;
+}
+
+.instructions p:last-child {
+  margin-bottom: 0;
+}
+
+.instructions ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #a0a0a0;
+  font-size: 0.8rem;
+  line-height: 1.8;
+}
+
+.instructions li {
+  margin-bottom: 0.25rem;
+}
+
+.instructions strong {
+  color: #6366f1;
+}
+
 .loginButton {
   background: #6366f1;
   color: white;
@@ -212,6 +247,11 @@
   font-weight: 600;
   color: white;
   flex-shrink: 0;
+}
+
+.icon svg {
+  width: 20px;
+  height: 20px;
 }
 
 .accountInfo,
