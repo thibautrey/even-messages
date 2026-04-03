@@ -11,20 +11,7 @@ import {
   BeeperClient,
   BeeperMessage,
 } from "../services/beeperClient";
-import { DisplayLine, GlassAction, GlassNavState } from "even-toolkit/types";
-import {
-  activateKeepAlive,
-  deactivateKeepAlive,
-} from "even-toolkit/keep-alive";
-import { mapGlassEvent } from "even-toolkit/action-map";
-import { buildActionBar, buildStaticActionBar } from "even-toolkit/action-bar";
-import { bindKeyboard } from "even-toolkit/keyboard";
-import { useCallback, useEffect, useState, useRef } from "react";
-
-import { buildHeaderLine } from "even-toolkit/text-utils";
-import { line } from "even-toolkit/types";
-import { useFlashPhase } from "even-toolkit/useFlashPhase";
-import { useGlasses } from "even-toolkit/useGlasses";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CreateStartUpPageContainer,
   waitForEvenAppBridge,
@@ -34,6 +21,7 @@ import {
   ImageRawDataUpdate,
   ListContainerProperty,
   ListItemContainerProperty,
+  OsEventTypeList,
   RebuildPageContainer,
   TextContainerProperty,
   TextContainerUpgrade,
@@ -63,7 +51,24 @@ const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 const GLASSES_DISPLAY_WIDTH = 576;
 const GLASSES_DISPLAY_HEIGHT = 288;
 const CHAT_TEXT_PREFIX = "    ";
-const ENABLE_CUSTOM_GLASSES_RENDERER = true;
+
+export type LineStyle = "normal" | "meta" | "separator" | "inverted";
+
+export interface DisplayLine {
+  text: string;
+  inverted: boolean;
+  style: LineStyle;
+}
+
+export type GlassAction =
+  | { type: "HIGHLIGHT_MOVE"; direction: "up" | "down" }
+  | { type: "SELECT_HIGHLIGHTED" }
+  | { type: "GO_BACK" };
+
+export interface GlassNavState {
+  highlightedIndex: number;
+  screen: string;
+}
 
 const BASE_PAGE_CONTAINER = {
   OVERLAY_ID: 1,
@@ -103,6 +108,31 @@ const ICONS = {
   SELECTED: ">",
   BACK: "<",
   UNREAD: "[!",
+};
+
+const TAP_COOLDOWN_MS = 220;
+const TAP_DUPLICATE_DEBOUNCE_MS = 90;
+const DOUBLE_TAP_DUPLICATE_DEBOUNCE_MS = 140;
+const SCROLL_SUPPRESS_AFTER_TAP_MS = 110;
+const SAME_DIRECTION_DEBOUNCE_MS = 350;
+const DIRECTION_CHANGE_DEBOUNCE_MS = 50;
+const SCROLL_SUPPRESS_AFTER_TEXT_MS = 80;
+const FLASH_INTERVAL_MS = 500;
+
+let lastTapTime = 0;
+let lastTapKind: "tap" | "double" | null = null;
+let lastScrollTime = 0;
+let lastScrollDir: "up" | "down" | null = null;
+let textUpdateTime = 0;
+
+const keepAliveResources: {
+  audioCtx: AudioContext | null;
+  oscillator: OscillatorNode | null;
+  lockPromise: Promise<unknown> | null;
+} = {
+  audioCtx: null,
+  oscillator: null,
+  lockPromise: null,
 };
 
 // Quick reply presets (2 columns x 4 rows = 8 replies)
@@ -192,8 +222,247 @@ function stripUnsupportedChars(text: string): string {
 }
 
 // Helper: create a separator line (using meta style so text renders)
+function line(
+  text: string,
+  style: LineStyle = "normal",
+  inverted = false,
+): DisplayLine {
+  return { text, style, inverted };
+}
+
 function sep(): DisplayLine {
   return line(SEPARATOR_LINE, "meta");
+}
+
+function buildHeaderLine(title: string, actionBar: string): string {
+  return `${title}  ${actionBar}`;
+}
+
+function buildActionBar(
+  buttons: string[],
+  selectedIndex: number,
+  activeLabel: string | null,
+  flashPhase: boolean,
+): string {
+  const activeIdx = activeLabel ? buttons.indexOf(activeLabel) : -1;
+  return buttons
+    .map((name, i) => {
+      if (activeIdx === i) {
+        const left = flashPhase ? "▶" : "▷";
+        const right = flashPhase ? "◀" : "◁";
+        return `${left}${name}${right}`;
+      }
+      if (activeIdx < 0 && i === selectedIndex) {
+        return `▶${name}◀`;
+      }
+      return ` ${name} `;
+    })
+    .join(" ");
+}
+
+function buildStaticActionBar(buttons: string[], selectedIndex: number): string {
+  return buttons
+    .map((name, i) => (i === selectedIndex ? `▶${name}◀` : ` ${name} `))
+    .join(" ");
+}
+
+function tryConsumeTap(kind: "tap" | "double"): boolean {
+  const now = Date.now();
+  const elapsed = now - lastTapTime;
+  const duplicateMs =
+    kind === "double"
+      ? DOUBLE_TAP_DUPLICATE_DEBOUNCE_MS
+      : TAP_DUPLICATE_DEBOUNCE_MS;
+
+  if (kind === lastTapKind && elapsed < duplicateMs) {
+    return false;
+  }
+
+  if (elapsed < TAP_COOLDOWN_MS && lastTapKind !== null) {
+    return false;
+  }
+
+  lastTapTime = now;
+  lastTapKind = kind;
+  return true;
+}
+
+function isScrollSuppressed(): boolean {
+  return Date.now() - lastTapTime < SCROLL_SUPPRESS_AFTER_TAP_MS;
+}
+
+function notifyTextUpdate(): void {
+  textUpdateTime = Date.now();
+}
+
+function isScrollDebounced(direction: "up" | "down"): boolean {
+  const now = Date.now();
+
+  if (now - textUpdateTime < SCROLL_SUPPRESS_AFTER_TEXT_MS) {
+    return true;
+  }
+
+  const threshold =
+    direction === lastScrollDir
+      ? SAME_DIRECTION_DEBOUNCE_MS
+      : DIRECTION_CHANGE_DEBOUNCE_MS;
+
+  if (now - lastScrollTime < threshold) {
+    return true;
+  }
+
+  lastScrollTime = now;
+  lastScrollDir = direction;
+  return false;
+}
+
+function mapGlassEvent(event: EvenHubEvent): GlassAction | null {
+  if (!event) {
+    return null;
+  }
+
+  try {
+    const ev = event.listEvent ?? event.textEvent ?? event.sysEvent;
+    if (!ev) {
+      return null;
+    }
+
+    const eventType = ev.eventType;
+    switch (eventType) {
+      case OsEventTypeList.CLICK_EVENT:
+        return tryConsumeTap("tap") ? { type: "SELECT_HIGHLIGHTED" } : null;
+      case OsEventTypeList.DOUBLE_CLICK_EVENT:
+        return tryConsumeTap("double") ? { type: "GO_BACK" } : null;
+      case OsEventTypeList.SCROLL_TOP_EVENT:
+        if (isScrollDebounced("up") || isScrollSuppressed()) {
+          return null;
+        }
+        return { type: "HIGHLIGHT_MOVE", direction: "up" };
+      case OsEventTypeList.SCROLL_BOTTOM_EVENT:
+        if (isScrollDebounced("down") || isScrollSuppressed()) {
+          return null;
+        }
+        return { type: "HIGHLIGHT_MOVE", direction: "down" };
+      default:
+        // Handle list selection events (currentSelectItemIndex indicates list item selection)
+        if ((ev as { currentSelectItemIndex?: number }).currentSelectItemIndex != null) {
+          return tryConsumeTap("tap") ? { type: "SELECT_HIGHLIGHTED" } : null;
+        }
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+function bindKeyboard(dispatch: (action: GlassAction) => void): () => void {
+  function isInteractive(element: HTMLElement): boolean {
+    const tag = element.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+      return true;
+    }
+    if (tag === "BUTTON" || tag === "A") {
+      return true;
+    }
+    return !!element.closest("button, a, [role=button]");
+  }
+
+  const keyHandler = (event: KeyboardEvent) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const tag = target.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
+      return;
+    }
+
+    switch (event.key) {
+      case "ArrowUp":
+        event.preventDefault();
+        dispatch({ type: "HIGHLIGHT_MOVE", direction: "up" });
+        break;
+      case "ArrowDown":
+        event.preventDefault();
+        dispatch({ type: "HIGHLIGHT_MOVE", direction: "down" });
+        break;
+      case "Enter":
+        event.preventDefault();
+        dispatch({ type: "SELECT_HIGHLIGHTED" });
+        break;
+      case "Escape":
+      case "Backspace":
+        event.preventDefault();
+        dispatch({ type: "GO_BACK" });
+        break;
+    }
+  };
+
+  let lastWheelTime = 0;
+  const wheelHandler = (event: WheelEvent) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement) || isInteractive(target)) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastWheelTime < 250) {
+      return;
+    }
+
+    lastWheelTime = now;
+    if (event.deltaY > 0) {
+      dispatch({ type: "HIGHLIGHT_MOVE", direction: "down" });
+    } else if (event.deltaY < 0) {
+      dispatch({ type: "HIGHLIGHT_MOVE", direction: "up" });
+    }
+  };
+
+  document.addEventListener("keydown", keyHandler);
+  document.addEventListener("wheel", wheelHandler, { passive: true });
+
+  return () => {
+    document.removeEventListener("keydown", keyHandler);
+    document.removeEventListener("wheel", wheelHandler);
+  };
+}
+
+function activateKeepAlive(lockName = "evenglass_keep_alive"): void {
+  let audioCtx: AudioContext | null = null;
+  let oscillator: OscillatorNode | null = null;
+
+  try {
+    audioCtx = new AudioContext();
+    oscillator = audioCtx.createOscillator();
+    oscillator.frequency.value = 1;
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.001;
+    oscillator.connect(gain);
+    gain.connect(audioCtx.destination);
+    oscillator.start();
+  } catch {
+    audioCtx?.close().catch(() => undefined);
+    audioCtx = null;
+    oscillator = null;
+  }
+
+  keepAliveResources.audioCtx = audioCtx;
+  keepAliveResources.oscillator = oscillator;
+
+  if (navigator.locks) {
+    keepAliveResources.lockPromise = navigator.locks.request(lockName, () => {
+      return new Promise(() => undefined);
+    });
+  }
+}
+
+function deactivateKeepAlive(): void {
+  keepAliveResources.oscillator?.stop();
+  keepAliveResources.audioCtx?.close().catch(() => undefined);
+  keepAliveResources.oscillator = null;
+  keepAliveResources.audioCtx = null;
+  keepAliveResources.lockPromise = null;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -395,6 +664,25 @@ function buildGlassesText(lines: DisplayLine[]): string {
       return `  ${entry.text}`;
     })
     .join("\n");
+}
+
+function useFlashPhase(active: boolean): boolean {
+  const [phase, setPhase] = useState(false);
+
+  useEffect(() => {
+    if (!active) {
+      setPhase(false);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setPhase((prev) => !prev);
+    }, FLASH_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [active]);
+
+  return phase;
 }
 
 function getMaxIndex(state: AppState): number {
@@ -1653,13 +1941,6 @@ export function GlassesUI({
   }, [stopVoiceReply]);
 
   useEffect(() => {
-    if (!ENABLE_CUSTOM_GLASSES_RENDERER) {
-      if (nativeOverlayScreenRef.current) {
-        void hideNativeOverlay();
-      }
-      return;
-    }
-
     if (state.currentScreen === "quickReply") {
       void showQuickReplyOverlay();
       return;
@@ -1704,7 +1985,6 @@ export function GlassesUI({
   }, [state.selectedAccount, state.selectedChat, state.messageScrollOffset]);
 
   // Handle selection
-  // Note: highlightedIndex comes from nav state (useGlasses), not app state
   const handleSelect = useCallback(
     (s: AppState, highlightedIndex: number): Partial<AppState> => {
       const updates: Partial<AppState> = {};
@@ -2167,13 +2447,6 @@ export function GlassesUI({
     [], // Empty deps - we use refs to access latest handlers
   );
 
-  const toDisplayData = useCallback(
-    (snapshot: AppState, nav: GlassNavState) => ({
-      lines: getDisplayLines(snapshot, nav),
-    }),
-    [getDisplayLines],
-  );
-
   const ensureGlassesStartup = useCallback(async (bridge: EvenAppBridge) => {
     if (glassesInitializedRef.current) {
       return;
@@ -2463,9 +2736,6 @@ export function GlassesUI({
   }, [state, navVersion, flushGlassesDisplay]);
 
   useEffect(() => {
-    if (!ENABLE_CUSTOM_GLASSES_RENDERER) {
-      return;
-    }
     let disposed = false;
     let unsubscribe: (() => void) | null = null;
 
@@ -2527,49 +2797,7 @@ export function GlassesUI({
     };
   }, [ensureGlassesStartup, flushGlassesDisplay, onGlassAction]);
 
-  if (!ENABLE_CUSTOM_GLASSES_RENDERER) {
-    return (
-      <ToolkitGlassesBridge
-        state={state}
-        currentScreen={state.currentScreen}
-        toDisplayData={toDisplayData}
-        onGlassAction={onGlassAction}
-      />
-    );
-  }
-
   // This is a headless component - renders nothing in DOM
-  return null;
-}
-
-function ToolkitGlassesBridge({
-  state,
-  currentScreen,
-  toDisplayData,
-  onGlassAction,
-}: {
-  state: AppState;
-  currentScreen: Screen;
-  toDisplayData: (snapshot: AppState, nav: GlassNavState) => { lines: DisplayLine[] };
-  onGlassAction: (
-    action: GlassAction,
-    nav: GlassNavState,
-    snapshot: AppState,
-  ) => GlassNavState;
-}) {
-  const deriveScreen = useCallback(
-    (_path: string) => currentScreen,
-    [currentScreen],
-  );
-
-  useGlasses({
-    getSnapshot: () => state,
-    toDisplayData,
-    onGlassAction,
-    deriveScreen,
-    appName: "even-messages",
-  });
-
   return null;
 }
 
