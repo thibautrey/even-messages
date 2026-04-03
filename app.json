@@ -1,6 +1,6 @@
 {
   "package_id": "solutions.pleiades.evenmessages",
-  "edition": "202604",
+  "edition": "202601",
   "name": "Even Messages",
   "version": "0.1.0",
   "min_app_version": "2.0.0",
