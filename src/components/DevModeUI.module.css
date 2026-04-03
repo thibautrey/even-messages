@@ -246,6 +246,25 @@ body {
   background: rgba(255, 84, 84, 0.1) !important;
 }
 
+.networkNotice {
+  margin-bottom: 1.5rem;
+  padding: 0.9rem 1rem;
+  background: var(--color-bc-2nd);
+  border: 1px solid var(--color-bc-4th);
+  border-radius: 0.75rem;
+  color: var(--color-tc-2nd);
+  line-height: 1.5;
+}
+
+.networkNotice strong {
+  color: var(--color-tc-1st);
+}
+
+.networkNotice code {
+  font-family: "SF Mono", "Fira Code", "Monaco", "Consolas", monospace;
+  color: var(--color-tc-1st);
+}
+
 /* Lists using BC - 1st for surface background */
 .list {
   min-height: 100%;
@@ -753,6 +772,22 @@ body {
   margin-top: 0.5rem;
   color: var(--color-tc-2nd);
   font-size: 0.75rem;
+}
+
+.helpText {
+  margin: 0 0 1.5rem;
+  color: var(--color-tc-2nd);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.helpLink {
+  color: var(--color-tc-1st);
+  text-decoration: underline;
+}
+
+.helpLink:hover {
+  opacity: 0.8;
 }
 
 .tokenInputWrapper {

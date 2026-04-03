@@ -10,6 +10,40 @@ import {
 import { PlatformIcon } from "./PlatformIcon";
 import styles from "./DevModeUI.module.css";
 
+const TAILSCALE_SETUP_URL =
+  "https://github.com/thibautrey/even-messages/blob/main/docs/TAILSCALE_SETUP.md";
+
+function getHostnameFromBaseUrl(baseUrl?: string | null): string | null {
+  if (!baseUrl) return null;
+
+  try {
+    return new URL(baseUrl).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isTailscaleIpv4(hostname: string): boolean {
+  const parts = hostname.split(".");
+  if (parts.length !== 4) return false;
+
+  const octets = parts.map((part) => Number(part));
+  if (octets.some((octet) => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+
+  return octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+}
+
+function isProbablyTailscaleAddress(hostname: string): boolean {
+  return (
+    isTailscaleIpv4(hostname) ||
+    hostname.startsWith("fd7a:115c:a1e0:") ||
+    hostname.endsWith(".ts.net") ||
+    hostname.endsWith(".tailscale.net")
+  );
+}
+
 // Debug logging system
 interface LogEntry {
   id: number;
@@ -286,6 +320,14 @@ export function DevModeUI({
   };
 
   const displayedChats = chats.map(formatChat);
+  const configuredHostname = getHostnameFromBaseUrl(apiConfig?.baseUrl);
+  const showTailscaleBanner =
+    isAuthenticated &&
+    !!configuredHostname &&
+    !isProbablyTailscaleAddress(configuredHostname) &&
+    configuredHostname !== "localhost" &&
+    configuredHostname !== "127.0.0.1" &&
+    configuredHostname !== "::1";
 
   // Debug logs state
   const [showDebugLogs, setShowDebugLogs] = useState(false);
@@ -409,6 +451,18 @@ export function DevModeUI({
                 </ol>
               </div>
               <SettingsForm onSave={onSaveSettings!} savedConfig={apiConfig} />
+              <p className={styles.helpText}>
+                Need to use the app away from home?{" "}
+                <a
+                  href={TAILSCALE_SETUP_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.helpLink}
+                >
+                  Read the Tailscale setup guide
+                </a>
+                .
+              </p>
             </div>
           </div>
         )}
@@ -462,6 +516,23 @@ export function DevModeUI({
                 Logout
               </button>
             </nav>
+
+            {showTailscaleBanner && (
+              <div className={styles.networkNotice}>
+                <strong>Using a non-Tailscale address:</strong> your current
+                Beeper URL looks like <code>{configuredHostname}</code>. If you
+                want to use Even Messages away from home, follow the{" "}
+                <a
+                  href={TAILSCALE_SETUP_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={styles.helpLink}
+                >
+                  Tailscale setup guide
+                </a>
+                .
+              </div>
+            )}
 
             {/* Accounts View */}
             {currentView === "accounts" && (
@@ -763,6 +834,19 @@ function BeeperSettingsPane({
           Paste your API token from Beeper's Developer Mode
         </span>
       </div>
+
+      <p className={styles.helpText}>
+        Want to use Even Messages outside your home network?{" "}
+        <a
+          href={TAILSCALE_SETUP_URL}
+          target="_blank"
+          rel="noreferrer"
+          className={styles.helpLink}
+        >
+          Open the Tailscale setup guide
+        </a>
+        .
+      </p>
 
       <div className={styles.modalActions}>
         <button type="submit" className={styles.saveButton}>
