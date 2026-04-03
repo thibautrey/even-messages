@@ -1,3 +1,8 @@
+/* Import font family from variables */
+body {
+  font-family: FK Grotesk Neue, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
 .container {
   height: 100vh;
   width: 100%;
@@ -6,10 +11,9 @@
   flex-direction: column;
   overflow: hidden;
   overflow-x: hidden;
-  background: #1a1a2e;
-  color: #eaeaea;
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--color-bc-3rd);
+  color: var(--color-tc-1st);
+  font-family: FK Grotesk Neue, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .header {
@@ -18,9 +22,9 @@
   z-index: 20;
   flex-shrink: 0;
   min-width: 0;
-  padding: 1.5rem 2rem;
-  background: #16162a;
-  border-bottom: 1px solid #2d2d4a;
+  padding: 1rem 1rem;
+  background: var(--color-bc-1st);
+  border-bottom: 1px solid var(--color-bc-4th);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -29,24 +33,25 @@
 .header h1 {
   margin: 0;
   font-size: 1.5rem;
-  color: #fff;
+  color: var(--color-tc-1st);
   text-align: center;
 }
 
 .headerMeta {
-  color: #8f90b5;
+  color: var(--color-tc-2nd);
   font-size: 0.9rem;
 }
 
+/* Status badges with semantic color coding */
 .statusBadge {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.35rem 0.75rem;
-  border: 1px solid #2d2d4a;
+  border: 1px solid var(--color-bc-4th);
   border-radius: 999px;
-  background: #1f1f3a;
-  color: #eaeaea;
+  background: var(--color-bc-2nd);
+  color: var(--color-tc-1st);
 }
 
 .statusDot {
@@ -56,39 +61,56 @@
   flex-shrink: 0;
 }
 
+/* Green = connected/success (TC - Green) */
 .statusOnline {
-  background: #4ade80;
-  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.2);
+  background: var(--color-tc-green);
+  box-shadow: 0 0 0 2px rgba(75, 185, 86, 0.2);
 }
 
+/* Pending/Loading state - using secondary text color */
 .statusPending {
-  background: #facc15;
-  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2);
+  background: var(--color-tc-2nd);
+  box-shadow: 0 0 0 2px rgba(123, 123, 123, 0.2);
 }
 
+/* Red = disconnected/error (TC - Red) */
 .statusOffline {
-  background: #f87171;
-  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
+  background: var(--color-tc-red);
+  box-shadow: 0 0 0 2px rgba(255, 84, 84, 0.2);
 }
 
+/* Error banner using TC - Red for errors */
 .errorBanner {
   padding: 1rem 2rem;
-  background: rgba(239, 68, 68, 0.1);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
-  color: #f87171;
+  background: rgba(255, 84, 84, 0.1);
+  border-bottom: 1px solid rgba(255, 84, 84, 0.3);
+  color: var(--color-tc-red);
   text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+}
+
+.errorDismiss {
+  background: transparent;
+  border: 1px solid rgba(255, 84, 84, 0.5);
+  color: var(--color-tc-red);
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  font-size: 0.75rem;
 }
 
 .main {
   flex: 1;
   min-height: 0;
   min-width: 0;
-  padding: 2rem;
   overflow-y: auto;
   overflow-x: hidden;
 }
 
-/* Login */
+/* Login section */
 .loginSection {
   display: flex;
   justify-content: center;
@@ -97,28 +119,27 @@
 }
 
 .loginCard {
-  background: #16162a;
-  padding: 3rem;
-  border-radius: 1rem;
   max-width: 400px;
   text-align: center;
-  border: 1px solid #2d2d4a;
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
 .loginCard h2 {
   margin: 0 0 1rem;
-  color: #fff;
+  color: var(--color-tc-1st);
 }
 
 .loginCard p {
-  color: #a0a0a0;
+  color: var(--color-tc-2nd);
   margin-bottom: 1.5rem;
   line-height: 1.6;
 }
 
+/* Instructions using BC - 2nd for subtle background */
 .instructions {
-  background: #1f1f3a;
-  border: 1px solid #3d3d5a;
+  background: var(--color-bc-2nd);
+  border: 1px solid var(--color-bc-4th);
   border-radius: 0.75rem;
   padding: 1rem 1.25rem;
   margin-bottom: 1.5rem;
@@ -127,7 +148,7 @@
 
 .instructions p {
   margin: 0 0 0.75rem;
-  color: #fff;
+  color: var(--color-tc-1st);
   font-size: 0.875rem;
 }
 
@@ -138,7 +159,7 @@
 .instructions ol {
   margin: 0;
   padding-left: 1.25rem;
-  color: #a0a0a0;
+  color: var(--color-tc-2nd);
   font-size: 0.8rem;
   line-height: 1.8;
 }
@@ -148,22 +169,23 @@
 }
 
 .instructions strong {
-  color: #6366f1;
+  color: var(--color-tc-1st);
 }
 
+/* Primary button: BC - Highlight + TC - Highlight */
 .loginButton {
-  background: #6366f1;
-  color: white;
+  background: var(--color-bc-highlight);
+  color: var(--color-tc-highlight);
   border: none;
   padding: 0.875rem 2rem;
   border-radius: 0.5rem;
   font-size: 1rem;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: opacity 0.2s;
 }
 
 .loginButton:hover:not(:disabled) {
-  background: #4f46e5;
+  opacity: 0.9;
 }
 
 .loginButton:disabled {
@@ -173,18 +195,18 @@
 
 .loginHint {
   font-size: 0.75rem;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   margin-top: 1rem;
 }
 
-/* Breadcrumb */
+/* Breadcrumb navigation using BC - 2nd for background */
 .breadcrumb {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 1.5rem;
   padding: 0.75rem 1rem;
-  background: #16162a;
+  background: var(--color-bc-2nd);
   border-radius: 0.5rem;
   flex-wrap: wrap;
 }
@@ -192,7 +214,7 @@
 .breadcrumb button {
   background: none;
   border: none;
-  color: #a0a0a0;
+  color: var(--color-tc-2nd);
   cursor: pointer;
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
@@ -200,56 +222,56 @@
 }
 
 .breadcrumb button:hover {
-  color: #fff;
-  background: #2d2d4a;
+  color: var(--color-tc-1st);
+  background: var(--color-bc-4th);
 }
 
 .breadcrumb button.active {
-  color: #6366f1;
+  color: var(--color-tc-1st);
+  font-weight: 500;
 }
 
 .separator {
-  color: #4a4a4a;
+  color: var(--color-tc-2nd);
 }
 
+/* Logout button using TC - Red for destructive action */
 .logoutButton {
   margin-left: auto;
-  color: #f87171 !important;
+  color: var(--color-tc-red) !important;
 }
 
 .logoutButton:hover {
-  color: #ef4444 !important;
+  color: var(--color-tc-red) !important;
+  background: rgba(255, 84, 84, 0.1) !important;
 }
 
-/* Lists */
+/* Lists using BC - 1st for surface background */
 .list {
-  background: #16162a;
-  border-radius: 1rem;
-  padding: 1.5rem;
-  border: 1px solid #2d2d4a;
   min-height: 100%;
 }
 
 .list h2 {
   margin: 0 0 0.5rem;
   font-size: 1.25rem;
-  color: #fff;
+  color: var(--color-tc-1st);
 }
 
 .countInfo {
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   font-size: 0.875rem;
   margin-bottom: 1.5rem;
 }
 
+/* List items using BC - 2nd for subtle background */
 .listItem {
   display: flex;
   align-items: center;
   gap: 1rem;
   width: 100%;
   padding: 1rem;
-  background: #1f1f3a;
-  border: 1px solid #2d2d4a;
+  background: var(--color-bc-2nd);
+  border: 1px solid var(--color-bc-4th);
   border-radius: 0.75rem;
   margin-bottom: 0.75rem;
   cursor: pointer;
@@ -258,25 +280,26 @@
 }
 
 .listItem:hover {
-  background: #2a2a4a;
-  border-color: #3d3d5a;
+  background: var(--color-bc-3rd);
+  border-color: var(--color-tc-2nd);
 }
 
 .listItem:last-child {
   margin-bottom: 0;
 }
 
+/* Icon uses BC - Highlight for primary accent */
 .icon {
   width: 40px;
   height: 40px;
-  background: #6366f1;
+  background: var(--color-bc-highlight);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.875rem;
   font-weight: 600;
-  color: white;
+  color: var(--color-tc-highlight);
   flex-shrink: 0;
 }
 
@@ -293,24 +316,26 @@
 
 .name {
   display: block;
-  color: #fff;
+  color: var(--color-tc-1st);
   font-weight: 500;
   margin-bottom: 0.25rem;
 }
 
+/* Secondary text using TC - 2nd */
 .accountId,
 .preview {
   display: block;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   font-size: 0.75rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Badge uses BC - Highlight */
 .badge {
-  background: #6366f1;
-  color: white;
+  background: var(--color-bc-highlight);
+  color: var(--color-tc-highlight);
   padding: 0.25rem 0.625rem;
   border-radius: 1rem;
   font-size: 0.75rem;
@@ -321,8 +346,9 @@
   border-style: dashed;
 }
 
+/* All Chats icon uses TC - Green for success/connected */
 .allChats .icon {
-  background: #10b981;
+  background: var(--color-tc-green);
 }
 
 .backButton {
@@ -330,9 +356,9 @@
   width: 100%;
   padding: 0.75rem 1rem;
   background: transparent;
-  border: 1px solid #3d3d5a;
+  border: 1px solid var(--color-bc-4th);
   border-radius: 0.5rem;
-  color: #a0a0a0;
+  color: var(--color-tc-2nd);
   cursor: pointer;
   margin-bottom: 1rem;
   text-align: left;
@@ -340,16 +366,12 @@
 }
 
 .backButton:hover {
-  background: #2d2d4a;
-  color: #fff;
+  background: var(--color-bc-2nd);
+  color: var(--color-tc-1st);
 }
 
-/* Messages */
+/* Messages view */
 .messages {
-  background: #16162a;
-  border-radius: 1rem;
-  padding: 1.5rem;
-  border: 1px solid #2d2d4a;
   display: flex;
   flex-direction: column;
   height: calc(100vh - 300px);
@@ -372,23 +394,26 @@
   position: relative;
 }
 
+/* Incoming messages use BC - 2nd */
 .incoming {
-  background: #2d2d4a;
+  background: var(--color-bc-2nd);
   align-self: flex-start;
   border-bottom-left-radius: 0.25rem;
+  color: var(--color-tc-1st);
 }
 
+/* Outgoing messages use BC - Highlight + TC - Highlight */
 .outgoing {
-  background: #6366f1;
+  background: var(--color-bc-highlight);
   align-self: flex-end;
   border-bottom-right-radius: 0.25rem;
-  color: white;
+  color: var(--color-tc-highlight);
 }
 
 .sender {
   display: block;
   font-size: 0.75rem;
-  color: #a0a0a0;
+  color: var(--color-tc-2nd);
   margin-bottom: 0.25rem;
 }
 
@@ -398,16 +423,17 @@
   word-break: break-word;
 }
 
+/* Time uses TC - 2nd for secondary info */
 .time {
   display: block;
   font-size: 0.625rem;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-tc-2nd);
   margin-top: 0.25rem;
   text-align: right;
 }
 
 .msgStatus {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--color-tc-2nd);
 }
 
 .messageImage {
@@ -417,18 +443,19 @@
   object-fit: cover;
 }
 
+/* New messages badge uses BC - Accent (attention/highlight) */
 .newMessagesBadge {
   position: absolute;
   top: 4rem;
   left: 50%;
   transform: translateX(-50%);
-  background: #6366f1;
-  color: white;
+  background: var(--color-bc-accent);
+  color: var(--color-tc-1st);
   padding: 0.5rem 1rem;
   border-radius: 1rem;
   font-size: 0.875rem;
   font-weight: 500;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 4px 12px rgba(254, 249, 145, 0.4);
   cursor: pointer;
   z-index: 10;
   animation: slideDown 0.3s ease-out;
@@ -436,7 +463,7 @@
 }
 
 .newMessagesBadge:hover {
-  background: #5558e3;
+  opacity: 0.9;
 }
 
 @keyframes slideDown {
@@ -455,47 +482,50 @@
   gap: 0.75rem;
 }
 
+/* Input uses SC - 2nd for form input background */
 .input {
   flex: 1;
   padding: 0.875rem 1rem;
-  background: #1f1f3a;
-  border: 1px solid #3d3d5a;
+  background: var(--color-sc-2nd);
+  border: 1px solid var(--color-bc-4th);
   border-radius: 0.5rem;
-  color: #fff;
+  color: var(--color-tc-1st);
   font-size: 1rem;
 }
 
 .input:focus {
   outline: none;
-  border-color: #6366f1;
+  border-color: var(--color-tc-2nd);
 }
 
+/* Send button uses BC - Highlight + TC - Highlight */
 .sendButton {
   padding: 0.875rem 1.5rem;
-  background: #6366f1;
+  background: var(--color-bc-highlight);
   border: none;
   border-radius: 0.5rem;
-  color: white;
+  color: var(--color-tc-highlight);
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: opacity 0.2s;
 }
 
 .sendButton:hover {
-  background: #4f46e5;
+  opacity: 0.9;
 }
 
 /* States */
 .emptyState,
-.loading,
-.errorState {
+.loading {
   text-align: center;
   padding: 2rem;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
 }
 
 .errorState {
-  color: #f87171;
+  text-align: center;
+  padding: 2rem;
+  color: var(--color-tc-red);
 }
 
 /* Footer */
@@ -506,10 +536,10 @@
   flex-shrink: 0;
   min-width: 0;
   padding: 1rem 2rem;
-  background: #16162a;
-  border-top: 1px solid #2d2d4a;
+  background: var(--color-bc-1st);
+  border-top: 1px solid var(--color-bc-4th);
   text-align: center;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   font-size: 0.75rem;
 }
 
@@ -533,14 +563,14 @@
 }
 
 .apiInfo {
-  color: #4a4a4a;
+  color: var(--color-tc-2nd);
 }
 
-/* Settings Button */
+/* Settings button using BC - 2nd */
 .settingsButton {
-  background: #2d2d4a;
-  border: 1px solid #3d3d5a;
-  color: #a0a0a0;
+  background: var(--color-bc-2nd);
+  border: 1px solid var(--color-bc-4th);
+  color: var(--color-tc-2nd);
   padding: 0.375rem 0.75rem;
   border-radius: 0.375rem;
   cursor: pointer;
@@ -549,31 +579,8 @@
 }
 
 .settingsButton:hover {
-  background: #3d3d5a;
-  color: #fff;
-}
-
-/* Error Banner */
-.errorBanner {
-  padding: 1rem 2rem;
-  background: rgba(239, 68, 68, 0.1);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.3);
-  color: #f87171;
-  text-align: center;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-}
-
-.errorDismiss {
-  background: transparent;
-  border: 1px solid rgba(239, 68, 68, 0.5);
-  color: #f87171;
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.25rem;
-  cursor: pointer;
-  font-size: 0.75rem;
+  background: var(--color-bc-3rd);
+  color: var(--color-tc-1st);
 }
 
 /* Divider */
@@ -581,7 +588,7 @@
   display: flex;
   align-items: center;
   margin: 1.5rem 0;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
 }
 
 .divider::before,
@@ -589,7 +596,7 @@
   content: "";
   flex: 1;
   height: 1px;
-  background: #3d3d5a;
+  background: var(--color-bc-4th);
 }
 
 .divider span {
@@ -599,8 +606,8 @@
 
 .manualButton {
   background: transparent;
-  border: 1px solid #3d3d5a;
-  color: #a0a0a0;
+  border: 1px solid var(--color-bc-4th);
+  color: var(--color-tc-2nd);
   padding: 0.75rem 1rem;
   border-radius: 0.5rem;
   cursor: pointer;
@@ -609,18 +616,18 @@
 }
 
 .manualButton:hover {
-  background: #2d2d4a;
-  color: #fff;
+  background: var(--color-bc-2nd);
+  color: var(--color-tc-1st);
 }
 
-/* Modal */
+/* Modal overlay uses SC - 1st (semi-transparent backdrop) */
 .modalOverlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--color-sc-1st);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -628,24 +635,26 @@
 }
 
 .modal {
-  background: #16162a;
+  background: var(--color-bc-1st);
   border-radius: 1rem;
   width: 100%;
   max-width: 480px;
-  border: 1px solid #2d2d4a;
+  border: 1px solid var(--color-bc-4th);
   margin: 1rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 .modalWide {
-  background: #16162a;
+  background: var(--color-bc-1st);
   border-radius: 1rem;
   width: min(760px, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
   display: flex;
   flex-direction: column;
-  border: 1px solid #2d2d4a;
+  border: 1px solid var(--color-bc-4th);
   margin: 1rem;
   overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 .modalHeader {
@@ -653,19 +662,19 @@
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem;
-  border-bottom: 1px solid #2d2d4a;
+  border-bottom: 1px solid var(--color-bc-4th);
 }
 
 .modalHeader h2 {
   margin: 0;
   font-size: 1.25rem;
-  color: #fff;
+  color: var(--color-tc-1st);
 }
 
 .modalClose {
   background: none;
   border: none;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   font-size: 1.5rem;
   cursor: pointer;
   padding: 0;
@@ -673,7 +682,7 @@
 }
 
 .modalClose:hover {
-  color: #fff;
+  color: var(--color-tc-1st);
 }
 
 .modalBody {
@@ -683,6 +692,7 @@
   overflow-y: auto;
 }
 
+/* Settings tabs using BC - 2nd for inactive */
 .settingsTabs {
   display: flex;
   gap: 0.75rem;
@@ -690,9 +700,9 @@
 }
 
 .settingsTab {
-  border: 1px solid #34345a;
-  background: #1f1f3a;
-  color: #a0a0a0;
+  border: 1px solid var(--color-bc-4th);
+  background: var(--color-bc-2nd);
+  color: var(--color-tc-2nd);
   border-radius: 999px;
   padding: 0.55rem 1rem;
   cursor: pointer;
@@ -700,14 +710,15 @@
 }
 
 .settingsTab:hover {
-  background: #29294a;
-  color: #fff;
+  background: var(--color-bc-3rd);
+  color: var(--color-tc-1st);
 }
 
+/* Active tab uses BC - Highlight + TC - Highlight */
 .settingsTabActive {
-  background: #6366f1;
-  border-color: #6366f1;
-  color: #fff;
+  background: var(--color-bc-highlight);
+  border-color: var(--color-bc-highlight);
+  color: var(--color-tc-highlight);
 }
 
 .formGroup {
@@ -717,29 +728,30 @@
 .formGroup label {
   display: block;
   margin-bottom: 0.5rem;
-  color: #fff;
+  color: var(--color-tc-1st);
   font-weight: 500;
 }
 
 .formGroup input {
   width: 100%;
   padding: 0.75rem 1rem;
-  background: #1f1f3a;
-  border: 1px solid #3d3d5a;
+  background: var(--color-sc-2nd);
+  border: 1px solid var(--color-bc-4th);
   border-radius: 0.5rem;
-  color: #fff;
+  color: var(--color-tc-1st);
   font-size: 0.875rem;
 }
 
 .formGroup input:focus {
   outline: none;
-  border-color: #6366f1;
+  border-color: var(--color-tc-2nd);
 }
 
+/* Hint uses TC - 2nd for secondary text */
 .hint {
   display: block;
   margin-top: 0.5rem;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   font-size: 0.75rem;
 }
 
@@ -753,9 +765,9 @@
 }
 
 .toggleToken {
-  background: #2d2d4a;
-  border: 1px solid #3d3d5a;
-  color: #a0a0a0;
+  background: var(--color-bc-2nd);
+  border: 1px solid var(--color-bc-4th);
+  color: var(--color-tc-2nd);
   padding: 0 0.75rem;
   border-radius: 0.5rem;
   cursor: pointer;
@@ -764,8 +776,8 @@
 }
 
 .toggleToken:hover {
-  background: #3d3d5a;
-  color: #fff;
+  background: var(--color-bc-3rd);
+  color: var(--color-tc-1st);
 }
 
 .modalActions {
@@ -779,44 +791,45 @@
   bottom: 0;
   z-index: 2;
   padding: 0 1.5rem 1.5rem;
-  background: linear-gradient(180deg, rgba(22, 22, 42, 0) 0%, #16162a 24px);
-  border-top: 1px solid #2d2d4a;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0) 0%, var(--color-bc-1st) 24px);
+  border-top: 1px solid var(--color-bc-4th);
 }
 
 .modalFooterActions .cancelButton {
   width: 100%;
 }
 
+/* Cancel button using BC - 1st + TC - 1st */
 .cancelButton {
   flex: 1;
   padding: 0.75rem 1rem;
-  background: transparent;
-  border: 1px solid #3d3d5a;
-  color: #a0a0a0;
+  background: var(--color-bc-1st);
+  border: 1px solid var(--color-bc-4th);
+  color: var(--color-tc-1st);
   border-radius: 0.5rem;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .cancelButton:hover {
-  background: #2d2d4a;
-  color: #fff;
+  background: var(--color-bc-2nd);
 }
 
+/* Save button uses BC - Highlight + TC - Highlight */
 .saveButton {
   flex: 1;
   padding: 0.75rem 1rem;
-  background: #6366f1;
+  background: var(--color-bc-highlight);
   border: none;
-  color: white;
+  color: var(--color-tc-highlight);
   border-radius: 0.5rem;
   cursor: pointer;
   font-weight: 500;
-  transition: background 0.2s;
+  transition: opacity 0.2s;
 }
 
 .saveButton:hover {
-  background: #4f46e5;
+  opacity: 0.9;
 }
 
 .saveButton:disabled {
@@ -827,7 +840,7 @@
 .modelSection {
   margin-top: 1.5rem;
   padding-top: 1.5rem;
-  border-top: 1px solid #2d2d4a;
+  border-top: 1px solid var(--color-bc-4th);
 }
 
 .modelSectionHeader {
@@ -840,11 +853,11 @@
 
 .modelSectionHeader h3 {
   margin: 0;
-  color: #fff;
+  color: var(--color-tc-1st);
 }
 
 .selectedModel {
-  color: #8f90b5;
+  color: var(--color-tc-2nd);
   font-size: 0.8rem;
 }
 
@@ -858,9 +871,9 @@
 }
 
 .modelItem {
-  border: 1px solid #34345a;
-  background: #1b1b34;
-  color: #fff;
+  border: 1px solid var(--color-bc-4th);
+  background: var(--color-bc-2nd);
+  color: var(--color-tc-1st);
   border-radius: 0.85rem;
   padding: 0.9rem 1rem;
   text-align: left;
@@ -869,13 +882,14 @@
 }
 
 .modelItem:hover {
-  border-color: #6366f1;
-  background: #232346;
+  border-color: var(--color-tc-2nd);
+  background: var(--color-bc-3rd);
 }
 
+/* Selected model uses TC - Green for success state */
 .modelItemSelected {
-  border-color: #4ade80;
-  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.35);
+  border-color: var(--color-tc-green);
+  box-shadow: 0 0 0 1px rgba(75, 185, 86, 0.35);
 }
 
 .modelName {
@@ -886,12 +900,12 @@
 
 .modelMeta {
   display: block;
-  color: #8f90b5;
+  color: var(--color-tc-2nd);
   font-size: 0.75rem;
 }
 
 .inlineError {
-  color: #f87171;
+  color: var(--color-tc-red);
   margin: 0 0 1rem;
 }
 
@@ -899,20 +913,20 @@
 .showLogsButton {
   background: transparent;
   border: none;
-  color: #6366f1;
+  color: var(--color-tc-1st);
   cursor: pointer;
   font-size: 0.75rem;
   margin-top: 0.5rem;
   padding: 0.25rem 0.5rem;
   text-decoration: underline;
-  transition: color 0.2s;
+  transition: opacity 0.2s;
 }
 
 .showLogsButton:hover {
-  color: #818cf8;
+  opacity: 0.7;
 }
 
-/* Debug Panel */
+/* Debug Panel using BC - Highlight for dark theme */
 .debugPanel {
   position: fixed;
   bottom: 0;
@@ -921,8 +935,8 @@
   height: 40vh;
   min-height: 200px;
   max-height: 500px;
-  background: #0a0a0f;
-  border-top: 2px solid #3d3d5a;
+  background: var(--color-bc-highlight);
+  border-top: 2px solid var(--color-tc-2nd);
   display: flex;
   flex-direction: column;
   z-index: 9999;
@@ -934,13 +948,13 @@
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
-  background: #16162a;
-  border-bottom: 1px solid #2d2d4a;
+  background: var(--color-bc-highlight);
+  border-bottom: 1px solid var(--color-tc-2nd);
   flex-shrink: 0;
 }
 
 .debugTitle {
-  color: #fff;
+  color: var(--color-tc-highlight);
   font-weight: 600;
   font-size: 0.875rem;
 }
@@ -951,9 +965,9 @@
 }
 
 .debugScrollBtn {
-  background: #6366f1;
-  border: 1px solid #6366f1;
-  color: white;
+  background: var(--color-tc-2nd);
+  border: 1px solid var(--color-tc-2nd);
+  color: var(--color-tc-highlight);
   padding: 0.25rem 0.75rem;
   border-radius: 0.25rem;
   cursor: pointer;
@@ -963,7 +977,7 @@
 }
 
 .debugScrollBtn:hover {
-  background: #5558e3;
+  background: var(--color-tc-1st);
   animation: none;
 }
 
@@ -979,9 +993,9 @@
 
 .debugClear,
 .debugClose {
-  background: #2d2d4a;
-  border: 1px solid #3d3d5a;
-  color: #a0a0a0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--color-tc-2nd);
   padding: 0.25rem 0.75rem;
   border-radius: 0.25rem;
   cursor: pointer;
@@ -991,14 +1005,14 @@
 
 .debugClear:hover,
 .debugClose:hover {
-  background: #3d3d5a;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--color-tc-highlight);
 }
 
 .debugCopy {
-  background: #2d2d4a;
-  border: 1px solid #3d3d5a;
-  color: #a0a0a0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--color-tc-2nd);
   padding: 0.25rem 0.75rem;
   border-radius: 0.25rem;
   cursor: pointer;
@@ -1007,14 +1021,14 @@
 }
 
 .debugCopy:hover {
-  background: #3d3d5a;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--color-tc-highlight);
 }
 
 .debugCopySuccess {
-  background: rgba(74, 222, 128, 0.2);
-  border-color: #4ade80;
-  color: #4ade80;
+  background: rgba(75, 185, 86, 0.2);
+  border-color: var(--color-tc-green);
+  color: var(--color-tc-green);
 }
 
 .debugContent {
@@ -1026,7 +1040,7 @@
 }
 
 .debugEmpty {
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   text-align: center;
   padding: 2rem;
 }
@@ -1045,7 +1059,7 @@
 }
 
 .logTime {
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   margin-right: 0.5rem;
   flex-shrink: 0;
   font-size: 0.7rem;
@@ -1060,6 +1074,7 @@
 .logMessage {
   flex: 1;
   word-break: break-all;
+  color: var(--color-tc-highlight);
 }
 
 .logDetails {
@@ -1070,7 +1085,7 @@
   border-radius: 0.25rem;
   font-size: 0.7rem;
   white-space: pre-wrap;
-  color: #9ca3af;
+  color: var(--color-tc-2nd);
 }
 
 .logRequest {
@@ -1082,19 +1097,19 @@
 }
 
 .logResponse {
-  background: rgba(74, 222, 128, 0.1);
+  background: rgba(75, 185, 86, 0.1);
 }
 
 .logResponse .logIcon {
-  color: #4ade80;
+  color: var(--color-tc-green);
 }
 
 .logError {
-  background: rgba(248, 113, 113, 0.15);
+  background: rgba(255, 84, 84, 0.15);
 }
 
 .logError .logIcon {
-  color: #f87171;
+  color: var(--color-tc-red);
 }
 
 .logError .logMessage {
@@ -1106,7 +1121,7 @@
 }
 
 .logConsole .logIcon {
-  color: #fbbf24;
+  color: #f59e0b;
 }
 
 .logInfo {
@@ -1121,9 +1136,9 @@
   display: flex;
   justify-content: space-between;
   padding: 0.5rem 1rem;
-  background: #16162a;
-  border-top: 1px solid #2d2d4a;
+  background: var(--color-bc-highlight);
+  border-top: 1px solid var(--color-tc-2nd);
   font-size: 0.7rem;
-  color: #6b6b6b;
+  color: var(--color-tc-2nd);
   flex-shrink: 0;
 }

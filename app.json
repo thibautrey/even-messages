@@ -1,0 +1,23 @@
+{
+  "package_id": "solutions.pleiades.evenmessages",
+  "edition": "202604",
+  "name": "Even Messages",
+  "version": "0.1.0",
+  "min_app_version": "2.0.0",
+  "min_sdk_version": "0.0.9",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "This app needs to access the network in order to list the messages and send new messages.",
+      "whitelist": []
+    },
+    {
+    "name": "g2-microphone",
+    "desc": "Enables voice answer to messages."
+  }
+  ],
+  "supported_languages": [
+    "en"
+  ]
+}

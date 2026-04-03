@@ -18,6 +18,7 @@ export interface AppConfig {
     chatId: string | null
     view: 'accounts' | 'chats' | 'messages'
   }
+  disclaimerAcknowledged?: number
 }
 
 const CONFIG_KEY = 'even-messages-config'
@@ -26,9 +27,26 @@ const CONFIG_KEY = 'even-messages-config'
 let bridgeInstance: EvenAppBridge | null = null
 
 async function getBridge(): Promise<EvenAppBridge | null> {
-  if (bridgeInstance) return bridgeInstance
+  if (bridgeInstance) {
+    console.log('[Config] Using cached bridge instance')
+    return bridgeInstance
+  }
   try {
+    console.log('[Config] Waiting for Even App Bridge...')
     bridgeInstance = await waitForEvenAppBridge()
+    console.log('[Config] Even App Bridge obtained:', typeof bridgeInstance)
+    
+    // Verify bridge has required methods
+    if (bridgeInstance) {
+      const hasGetLocalStorage = typeof bridgeInstance.getLocalStorage === 'function'
+      const hasSetLocalStorage = typeof bridgeInstance.setLocalStorage === 'function'
+      console.log('[Config] Bridge capabilities - getLocalStorage:', hasGetLocalStorage, 'setLocalStorage:', hasSetLocalStorage)
+      
+      if (!hasGetLocalStorage || !hasSetLocalStorage) {
+        console.warn('[Config] Bridge missing storage methods')
+      }
+    }
+    
     return bridgeInstance
   } catch (e) {
     console.warn('[Config] Failed to get Even bridge:', e)
@@ -40,13 +58,24 @@ async function getBridge(): Promise<EvenAppBridge | null> {
  * Get current configuration from Even SDK storage (with localStorage fallback)
  */
 export async function getConfig(): Promise<AppConfig> {
+  console.log('[Config] Getting config...')
   try {
     const bridge = await getBridge()
     if (bridge) {
-      const stored = await bridge.getLocalStorage(CONFIG_KEY)
-      if (stored) {
-        return JSON.parse(stored)
+      console.log('[Config] Bridge available, reading from Even SDK storage with key:', CONFIG_KEY)
+      try {
+        const stored = await bridge.getLocalStorage(CONFIG_KEY)
+        console.log('[Config] Raw stored data from Even SDK:', stored === null ? 'null' : stored === undefined ? 'undefined' : typeof stored)
+        if (stored) {
+          const parsed = JSON.parse(stored)
+          console.log('[Config] Parsed config from Even SDK keys:', Object.keys(parsed))
+          return parsed
+        }
+      } catch (storageError) {
+        console.error('[Config] Error calling getLocalStorage:', storageError)
       }
+    } else {
+      console.log('[Config] Bridge not available, will try localStorage fallback')
     }
   } catch (e) {
     console.warn('[Config] Failed to get config from Even SDK:', e)
@@ -54,14 +83,19 @@ export async function getConfig(): Promise<AppConfig> {
   
   // Fallback to localStorage for development
   try {
+    console.log('[Config] Trying localStorage fallback...')
     const stored = localStorage.getItem(CONFIG_KEY)
+    console.log('[Config] Raw stored data from localStorage:', stored ? 'found' : 'not found')
     if (stored) {
-      return JSON.parse(stored)
+      const parsed = JSON.parse(stored)
+      console.log('[Config] Parsed config from localStorage:', Object.keys(parsed))
+      return parsed
     }
   } catch (e) {
     console.error('[Config] Failed to parse localStorage config:', e)
   }
   
+  console.log('[Config] No config found, returning empty object')
   return {}
 }
 
@@ -85,13 +119,26 @@ export function getConfigSync(): AppConfig {
  */
 export async function saveConfig(config: AppConfig): Promise<void> {
   const data = JSON.stringify(config)
+  console.log('[Config] Saving config with keys:', Object.keys(config))
+  console.log('[Config] Config data length:', data.length, 'bytes')
   
   try {
     const bridge = await getBridge()
     if (bridge) {
-      await bridge.setLocalStorage(CONFIG_KEY, data)
-      console.log('[Config] Saved to Even SDK storage')
-      return
+      console.log('[Config] Bridge available, saving to Even SDK storage with key:', CONFIG_KEY)
+      try {
+        await bridge.setLocalStorage(CONFIG_KEY, data)
+        console.log('[Config] Successfully saved to Even SDK storage')
+        
+        // Verify the save worked by immediately reading back
+        const verify = await bridge.getLocalStorage(CONFIG_KEY)
+        console.log('[Config] Verification readback:', verify ? 'data found' : 'no data', 'length:', verify?.length)
+        return
+      } catch (storageError) {
+        console.error('[Config] Error calling setLocalStorage:', storageError)
+      }
+    } else {
+      console.log('[Config] Bridge not available, will use localStorage fallback')
     }
   } catch (e) {
     console.warn('[Config] Failed to save to Even SDK, using fallback:', e)
@@ -217,6 +264,24 @@ export async function getLastOpenedState(): Promise<{ accountId: string | null; 
 export async function clearLastOpenedState(): Promise<void> {
   const config = await getConfig()
   delete config.lastOpened
+  await saveConfig(config)
+}
+
+/**
+ * Get the number of times the disclaimer has been acknowledged
+ * Returns 0 if never acknowledged
+ */
+export async function getDisclaimerAcknowledgedCount(): Promise<number> {
+  const config = await getConfig()
+  return config.disclaimerAcknowledged || 0
+}
+
+/**
+ * Increment the disclaimer acknowledgment count
+ */
+export async function acknowledgeDisclaimer(): Promise<void> {
+  const config = await getConfig()
+  config.disclaimerAcknowledged = (config.disclaimerAcknowledged || 0) + 1
   await saveConfig(config)
 }
 

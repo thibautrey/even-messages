@@ -21,5 +21,7 @@ export {
   getSpeechApiConfigSync,
   updateSpeechApiConfig,
   clearSpeechApiConfig,
+  getDisclaimerAcknowledgedCount,
+  acknowledgeDisclaimer,
   type SpeechApiConfig,
 } from './config'

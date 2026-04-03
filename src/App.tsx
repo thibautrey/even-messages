@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { GlassesUI } from './glasses/GlassesUI'
 import { DevModeUI } from './components/DevModeUI'
+import { Disclaimer } from './components/Disclaimer'
 import {
   BeeperClient,
   BeeperAccount,
@@ -13,6 +14,8 @@ import {
   saveLastOpenedState,
   getLastOpenedState,
   clearLastOpenedState,
+  getDisclaimerAcknowledgedCount,
+  acknowledgeDisclaimer,
   type SpeechApiConfig,
 } from './services'
 
@@ -38,6 +41,10 @@ export default function App() {
 
   const [apiConfig, setApiConfig] = useState<{ baseUrl: string; token: string } | null>(null)
   const [speechConfig, setSpeechConfig] = useState<SpeechApiConfig | null>(null)
+
+  // Disclaimer state
+  const [showDisclaimer, setShowDisclaimer] = useState(false)
+  const [disclaimerAckCount, setDisclaimerAckCount] = useState(0)
 
   // Load real data
   const loadRealData = useCallback(async (baseUrl: string, token: string) => {
@@ -68,19 +75,34 @@ export default function App() {
     }
   }, [])
 
-  // Initialize on mount - check for stored config
+  // Initialize on mount - check for stored config and disclaimer status
   useEffect(() => {
     async function init() {
       try {
+        // Check disclaimer acknowledgment count
+        const ackCount = await getDisclaimerAcknowledgedCount()
+        setDisclaimerAckCount(ackCount)
+        // Show disclaimer if acknowledged less than 3 times
+        if (ackCount < 3) {
+          setShowDisclaimer(true)
+        }
+
         // Check for stored API config
+        console.log('[App] Loading API config...')
         const config = await getApiConfig()
+        console.log('[App] API config loaded:', config ? 'found' : 'not found')
         if (config?.token) {
+          console.log('[App] Token found, setting authenticated state')
           setApiConfig(config)
           setIsAuthenticated(true)
           await loadRealData(config.baseUrl, config.token)
+        } else {
+          console.log('[App] No token found, staying in unauthenticated state')
         }
 
+        console.log('[App] Loading speech config...')
         const savedSpeechConfig = await getSpeechApiConfig()
+        console.log('[App] Speech config loaded:', savedSpeechConfig ? 'found' : 'not found')
         if (savedSpeechConfig) {
           setSpeechConfig(savedSpeechConfig)
         }
@@ -148,8 +170,10 @@ export default function App() {
   }, [selectedAccount, selectedChat, currentView, isAuthenticated])
 
   const handleSaveSettings = useCallback(async (baseUrl: string, token: string) => {
+    console.log('[App] Saving settings...')
     setError(null)
     await updateApiConfig(baseUrl, token)
+    console.log('[App] Settings saved successfully')
     setApiConfig({ baseUrl, token })
     setShowSettings(false)
     
@@ -170,6 +194,7 @@ export default function App() {
   }, [loadRealData])
 
   const handleSaveSpeechSettings = useCallback(async (baseUrl: string, token: string, model: string) => {
+    console.log('[App] Saving speech settings...')
     const nextConfig = {
       baseUrl: baseUrl.trim(),
       token: token.trim(),
@@ -177,6 +202,7 @@ export default function App() {
     }
 
     await updateSpeechApiConfig(nextConfig.baseUrl, nextConfig.token, nextConfig.model)
+    console.log('[App] Speech settings saved successfully')
     setSpeechConfig(nextConfig)
     setShowSettings(false)
   }, [])
@@ -241,6 +267,13 @@ export default function App() {
     }
   }, [apiConfig, selectedChat])
 
+  // Handle disclaimer acknowledgment
+  const handleAcknowledgeDisclaimer = useCallback(async () => {
+    await acknowledgeDisclaimer()
+    setDisclaimerAckCount(prev => prev + 1)
+    setShowDisclaimer(false)
+  }, [])
+
   // Filter chats by selected account
   const filteredChats = selectedAccount && selectedAccount !== 'all'
     ? chats.filter(c => c.accountID === selectedAccount)
@@ -248,6 +281,14 @@ export default function App() {
 
   return (
     <>
+      {/* Disclaimer Modal - shown on first 3 app starts */}
+      {showDisclaimer && (
+        <Disclaimer
+          onAcknowledge={handleAcknowledgeDisclaimer}
+          remainingCount={3 - disclaimerAckCount - 1}
+        />
+      )}
+
       {/* Glasses UI - renders nothing but controls the glasses display */}
       <GlassesUI beeperConfig={apiConfig} speechConfig={speechConfig} />
       
@@ -264,6 +305,7 @@ export default function App() {
         error={error}
         showSettings={showSettings}
         isSettingsDefaultOpen={!isAuthenticated && !isLoading}
+        apiConfig={apiConfig}
         speechConfig={speechConfig}
         onLogout={handleLogout}
         onOpenSettings={() => setShowSettings(true)}

@@ -63,7 +63,7 @@ const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 const GLASSES_DISPLAY_WIDTH = 576;
 const GLASSES_DISPLAY_HEIGHT = 288;
 const CHAT_TEXT_PREFIX = "    ";
-const ENABLE_CUSTOM_GLASSES_RENDERER = false;
+const ENABLE_CUSTOM_GLASSES_RENDERER = true;
 
 const BASE_PAGE_CONTAINER = {
   OVERLAY_ID: 1,
@@ -1266,7 +1266,7 @@ export function GlassesUI({
       height: 200,
       borderWidth: 1,
       borderColor: 15,
-      borderRdaius: 8,
+      borderRadius: 8,
       paddingLength: 8,
       isEventCapture: 1,
       itemContainer: quickReplyListItems,
@@ -1356,7 +1356,7 @@ export function GlassesUI({
       content: voiceContent,
       borderWidth: 2,
       borderColor: 15,
-      borderRdaius: 10,
+      borderRadius: 10,
       paddingLength: 14,
       isEventCapture: showSend ? 0 : 1,
     });
@@ -1375,7 +1375,7 @@ export function GlassesUI({
       height: 42,
       borderWidth: 1,
       borderColor: 15,
-      borderRdaius: 10,
+      borderRadius: 10,
       paddingLength: 6,
       isEventCapture: 1,
       itemContainer: sendButtonItems,
@@ -2191,7 +2191,7 @@ export function GlassesUI({
           height: GLASSES_DISPLAY_HEIGHT,
           borderWidth: 0,
           borderColor: 0,
-          borderRdaius: 0,
+          borderRadius: 0,
           paddingLength: 0,
           content: "",
           isEventCapture: 1,
@@ -2205,7 +2205,7 @@ export function GlassesUI({
           height: GLASSES_DISPLAY_HEIGHT,
           borderWidth: 0,
           borderColor: 0,
-          borderRdaius: 0,
+          borderRadius: 0,
           paddingLength: 6,
           content: "",
           isEventCapture: 0,
@@ -2236,7 +2236,7 @@ export function GlassesUI({
                 height: GLASSES_DISPLAY_HEIGHT,
                 borderWidth: 0,
                 borderColor: 0,
-                borderRdaius: 0,
+                borderRadius: 0,
                 paddingLength: 0,
                 content: "",
                 isEventCapture: 1,
@@ -2250,7 +2250,7 @@ export function GlassesUI({
                 height: GLASSES_DISPLAY_HEIGHT,
                 borderWidth: 0,
                 borderColor: 0,
-                borderRdaius: 0,
+                borderRadius: 0,
                 paddingLength: 6,
                 content: text,
                 isEventCapture: 0,
@@ -2314,7 +2314,7 @@ export function GlassesUI({
                 height: GLASSES_DISPLAY_HEIGHT,
                 borderWidth: 0,
                 borderColor: 0,
-                borderRdaius: 0,
+                borderRadius: 0,
                 paddingLength: 0,
                 content: "",
                 isEventCapture: 1,
@@ -2328,7 +2328,7 @@ export function GlassesUI({
                 height: GLASSES_DISPLAY_HEIGHT,
                 borderWidth: 0,
                 borderColor: 0,
-                borderRdaius: 0,
+                borderRadius: 0,
                 paddingLength: 6,
                 content: text,
                 isEventCapture: 0,

@@ -5,7 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>Even Messages</title>
     <style>
+      /* Font face declaration for FK Grotesk Neue */
+      @font-face {
+        font-family: 'FK Grotesk Neue';
+        src: url('/fonts/FKGroteskNeue-Regular.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+        font-display: swap;
+      }
+
       /* Minimal styling for development - glasses will handle actual display */
+      /* Uses semantic color system: TC/BC/SC naming convention */
+      
+      :root {
+        /* Text Colors (TC) */
+        --color-tc-highlight: #ffffff;
+        --color-tc-1st: #232323;
+        --color-tc-2nd: #7b7b7b;
+        --color-tc-red: #ff5454;
+        --color-tc-green: #4bb956;
+        
+        /* Background Colors (BC) */
+        --color-bc-highlight: #232323;
+        --color-bc-1st: #ffffff;
+        --color-bc-2nd: #f6f6f6;
+        --color-bc-3rd: #eeeeee;
+        --color-bc-4th: #e4e4e4;
+        --color-bc-accent: #fef991;
+      }
+      
       * {
         margin: 0;
         padding: 0;
@@ -14,8 +42,10 @@
       
       body {
         font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-        background: #0a0a0a;
-        color: #fff;
+        /* BC - 3rd: Default page background */
+        background: var(--color-bc-3rd);
+        /* TC - 1st: Primary body text */
+        color: var(--color-tc-1st);
         min-height: 100vh;
       }
       
@@ -31,19 +61,24 @@
       .dev-mode {
         text-align: center;
         padding: 40px;
-        background: #141414;
+        /* BC - 1st: Standard surface background */
+        background: var(--color-bc-1st);
         border-radius: 12px;
         max-width: 500px;
+        border: 1px solid var(--color-bc-4th);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
       }
       
       .dev-mode h1 {
         font-size: 24px;
         margin-bottom: 16px;
-        color: #3b82f6;
+        /* TC - 1st: Primary text */
+        color: var(--color-tc-1st);
       }
       
       .dev-mode p {
-        color: #888;
+        /* TC - 2nd: Secondary text */
+        color: var(--color-tc-2nd);
         margin-bottom: 12px;
         line-height: 1.5;
       }
@@ -51,17 +86,20 @@
       .dev-mode .status {
         margin-top: 20px;
         padding: 12px;
-        background: #1e1e1e;
+        /* BC - 2nd: Supporting layer background */
+        background: var(--color-bc-2nd);
         border-radius: 8px;
         font-size: 14px;
       }
       
+      /* TC - Green: Success/connected state */
       .dev-mode .success {
-        color: #22c55e;
+        color: var(--color-tc-green);
       }
       
+      /* TC - Red: Error state */
       .dev-mode .error {
-        color: #ef4444;
+        color: var(--color-tc-red);
       }
     </style>
   </head>

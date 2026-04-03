@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   BeeperAccount,
   BeeperChat,
-  getBeeperConfig,
-  getSpeechApiConfigSync,
+  getApiConfig,
   listSpeechProviderModels,
   type SpeechApiConfig,
   type SpeechProviderModel,
@@ -236,6 +235,7 @@ interface DevModeUIProps {
   error?: string | null;
   showSettings?: boolean;
   isSettingsDefaultOpen?: boolean;
+  apiConfig?: { baseUrl: string; token: string } | null;
   speechConfig?: SpeechApiConfig | null;
   onLogout?: () => void;
   onOpenSettings?: () => void;
@@ -265,6 +265,7 @@ export function DevModeUI({
   chats = [],
   error,
   showSettings = false,
+  apiConfig = null,
   speechConfig = null,
   onLogout,
   onOpenSettings,
@@ -307,7 +308,7 @@ export function DevModeUI({
       "info",
       `Even Messages Debug Console Initialized`,
       "info",
-      `Origin: ${window.location.origin}\nBase API: ${getBeeperConfig()?.baseUrl || "not configured"}`,
+      `Origin: ${window.location.origin}`,
     );
 
     return () => {
@@ -356,10 +357,7 @@ export function DevModeUI({
 
   return (
     <div className={styles.container}>
-      {/* Header */}
-      <header className={styles.header}>
-        <h1>Even Messages</h1>
-      </header>
+ 
 
       {/* Error Display */}
       {error && (
@@ -376,6 +374,7 @@ export function DevModeUI({
         <SettingsModal
           onSave={onSaveSettings!}
           onSaveSpeech={onSaveSpeechSettings!}
+          apiConfig={apiConfig}
           speechConfig={speechConfig}
           onClose={onCloseSettings!}
         />
@@ -387,18 +386,14 @@ export function DevModeUI({
           /* Settings Form - always visible when not authenticated */
           <div className={styles.loginSection}>
             <div className={styles.loginCard}>
-              <h2>API Configuration</h2>
-              <p>
-                Enter your API base URL and token to connect to your messaging
-                service.
-              </p>
+              <h2>Configuration</h2>
               <div className={styles.instructions}>
                 <p>
                   <strong>To get your token:</strong>
                 </p>
                 <ol>
                   <li>
-                    Open the <strong>Beeper Desktop App</strong>
+                    Open the <strong>Beeper Desktop App on your computer</strong>
                   </li>
                   <li>
                     Go to <strong>Settings</strong> →{" "}
@@ -413,7 +408,7 @@ export function DevModeUI({
                   </li>
                 </ol>
               </div>
-              <SettingsForm onSave={onSaveSettings!} />
+              <SettingsForm onSave={onSaveSettings!} savedConfig={apiConfig} />
             </div>
           </div>
         )}
@@ -565,6 +560,7 @@ export function DevModeUI({
             {currentView === "messages" && (
               <MessagesView
                 chatId={selectedConversation}
+                apiConfig={apiConfig}
                 onBack={onBack}
                 onSendMessage={onSendMessage}
                 scrollToBottomRef={undefined}
@@ -612,20 +608,12 @@ export function DevModeUI({
             Speech
           </span>
         </div>
-        <p className={styles.apiInfo}>
-          Beeper API: {getBeeperConfig()?.baseUrl || "http://localhost:23373"}
-        </p>
-        <p className={styles.apiInfo}>
-          Speech API:{" "}
-          {speechConfig?.baseUrl ||
-            getSpeechApiConfigSync()?.baseUrl ||
-            "not configured"}
-        </p>
-        <button className={styles.showLogsButton} onClick={handleToggleLogs}>
+
+        {/* <button className={styles.showLogsButton} onClick={handleToggleLogs}>
           {showDebugLogs
             ? "Hide logs"
             : `Show logs${newLogCount > 0 ? ` (${newLogCount} new)` : ""}`}
-        </button>
+        </button> */}
       </footer>
 
       {/* Debug Logs Panel */}
@@ -644,13 +632,14 @@ export function DevModeUI({
 // Settings Form Component (for inline use)
 function SettingsForm({
   onSave,
+  savedConfig,
 }: {
   onSave: (baseUrl: string, token: string) => void;
+  savedConfig?: { baseUrl: string; token: string } | null;
   defaultOpen?: boolean;
 }) {
-  const savedConfig = getBeeperConfig();
   const [baseUrl, setBaseUrl] = useState(
-    savedConfig?.baseUrl || "http://localhost:23373",
+    savedConfig?.baseUrl || "http://YOUR_COMPUTER_IP:23373",
   );
   const [token, setToken] = useState(savedConfig?.token || "");
   const [showToken, setShowToken] = useState(false);
@@ -675,7 +664,7 @@ function SettingsForm({
           required
         />
         <span className={styles.hint}>
-          The base URL of your messaging API server
+          The ip and port where your Beeper Desktop app is running
         </span>
       </div>
 
@@ -716,10 +705,11 @@ type SettingsTab = "beeper" | "speech";
 
 function BeeperSettingsPane({
   onSave,
+  savedConfig,
 }: {
   onSave: (baseUrl: string, token: string) => void;
+  savedConfig?: { baseUrl: string; token: string } | null;
 }) {
-  const savedConfig = getBeeperConfig();
   const [baseUrl, setBaseUrl] = useState(
     savedConfig?.baseUrl || "http://localhost:23373",
   );
@@ -746,7 +736,7 @@ function BeeperSettingsPane({
           required
         />
         <span className={styles.hint}>
-          The base URL of your messaging API server
+          The ip and port where your Beeper Desktop app is running
         </span>
       </div>
 
@@ -790,10 +780,9 @@ function SpeechSettingsPane({
   onSave: (baseUrl: string, token: string, model: string) => void;
   speechConfig: SpeechApiConfig | null;
 }) {
-  const savedConfig = speechConfig || getSpeechApiConfigSync();
-  const [baseUrl, setBaseUrl] = useState(savedConfig?.baseUrl || "");
-  const [token, setToken] = useState(savedConfig?.token || "");
-  const [selectedModel, setSelectedModel] = useState(savedConfig?.model || "");
+  const [baseUrl, setBaseUrl] = useState(speechConfig?.baseUrl || "");
+  const [token, setToken] = useState(speechConfig?.token || "");
+  const [selectedModel, setSelectedModel] = useState(speechConfig?.model || "");
   const [showToken, setShowToken] = useState(false);
   const [models, setModels] = useState<SpeechProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -929,11 +918,13 @@ function SpeechSettingsPane({
 function SettingsModal({
   onSave,
   onSaveSpeech,
+  apiConfig,
   speechConfig,
   onClose,
 }: {
   onSave: (baseUrl: string, token: string) => void;
   onSaveSpeech: (baseUrl: string, token: string, model: string) => void;
+  apiConfig: { baseUrl: string; token: string } | null;
   speechConfig: SpeechApiConfig | null;
   onClose: () => void;
 }) {
@@ -971,7 +962,7 @@ function SettingsModal({
         </div>
 
         {activeTab === "beeper" ? (
-          <BeeperSettingsPane onSave={onSave} />
+          <BeeperSettingsPane onSave={onSave} savedConfig={apiConfig} />
         ) : (
           <SpeechSettingsPane onSave={onSaveSpeech} speechConfig={speechConfig} />
         )}
@@ -993,11 +984,13 @@ function SettingsModal({
 // Messages View Component
 function MessagesView({
   chatId,
+  apiConfig,
   onBack,
   onSendMessage,
   scrollToBottomRef,
 }: {
   chatId: string | null;
+  apiConfig: { baseUrl: string; token: string } | null;
   onBack: () => void;
   onSendMessage: (content: string) => void;
   scrollToBottomRef?: React.MutableRefObject<(() => void) | null>;
@@ -1071,7 +1064,7 @@ function MessagesView({
     setError(null);
 
     try {
-      const config = getBeeperConfig();
+      const config = await getApiConfig();
       if (!config?.token) {
         setError("Not authenticated");
         return;
@@ -1109,8 +1102,7 @@ function MessagesView({
 
   // Get message preview text based on type
   const getMessageContent = (msg: any) => {
-    const config = getBeeperConfig();
-    const baseUrl = config?.baseUrl || "http://localhost:23373";
+    const baseUrl = apiConfig?.baseUrl || "http://localhost:23373";
 
     // Text message
     if (msg.text && msg.text.trim()) {

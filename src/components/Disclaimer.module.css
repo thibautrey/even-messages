@@ -1,0 +1,124 @@
+/* Disclaimer Modal - Uses semantic color system */
+
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* SC - 1st: Semi-transparent overlay for modals */
+  background: var(--color-sc-1st);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal {
+  /* BC - 1st: Standard background for surface */
+  background: var(--color-bc-1st);
+  border-radius: 1rem;
+  width: min(560px, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  border: 1px solid var(--color-bc-4th);
+  margin: 1rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem 1.5rem 0.75rem;
+  gap: 0.75rem;
+}
+
+/* Icon uses BC - Accent for attention/highlight state */
+.icon {
+  width: 2rem;
+  height: 2rem;
+  background: var(--color-bc-accent);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.125rem;
+  flex-shrink: 0;
+}
+
+/* TC - 1st: Primary text for titles */
+.title {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--color-tc-1st);
+  font-weight: 600;
+}
+
+.content {
+  padding: 0.75rem 1.5rem 1.5rem;
+  overflow-y: auto;
+}
+
+/* TC - 1st: Primary text for body content */
+.text {
+  margin: 0;
+  color: var(--color-tc-1st);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.text strong {
+  color: var(--color-tc-1st);
+  font-weight: 600;
+}
+
+/* Highlight uses BC - Accent for attention */
+.highlight {
+  background: rgba(254, 249, 145, 0.3);
+  border-left: 3px solid var(--color-bc-accent);
+  padding: 1rem 1rem 1rem 1.25rem;
+  margin: 1.25rem 0;
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+.highlight p {
+  margin: 0;
+  color: var(--color-tc-1st);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.footer {
+  padding: 0 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Acknowledge button: BC - Highlight + TC - Highlight */
+.acknowledgeButton {
+  width: 100%;
+  padding: 0.875rem 1.5rem;
+  background: var(--color-bc-highlight);
+  border: none;
+  border-radius: 0.5rem;
+  color: var(--color-tc-highlight);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.acknowledgeButton:hover {
+  opacity: 0.9;
+}
+
+/* TC - 2nd: Secondary text for metadata */
+.count {
+  text-align: center;
+  color: var(--color-tc-2nd);
+  font-size: 0.75rem;
+}

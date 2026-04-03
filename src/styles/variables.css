@@ -1,0 +1,67 @@
+/**
+ * Even Messages - UI Color System
+ * 
+ * Based on semantic color naming:
+ * - TC: Text Colors
+ * - BC: Background Colors  
+ * - SC: Shading/Overlays
+ * 
+ * Usage guidelines:
+ * - TC - Highlight: Use on dark backgrounds for emphasis (key labels, active states, toast headers)
+ * - TC - 1st: Default primary body text (titles, subtitles, main content)
+ * - TC - 2nd: Secondary information (labels, helper text, timestamps, placeholders)
+ * - TC - Red: Warnings, errors, disconnection status, destructive actions
+ * - TC - Green: Connection status, success states
+ * - BC - Highlight: Fill for emphasized buttons (primary action buttons)
+ * - BC - 1st: Standard background for buttons (light theme)
+ * - BC - 2nd: Supporting layer (hover states, card backgrounds above BC-3rd)
+ * - BC - 3rd: Default page background (main container)
+ * - BC - 4th: Deeper layer for grouped elements (modals, nested panels)
+ * - BC - Accent: Active/ongoing states (loading indicators, toast messages, highlights)
+ * - SC - 1st: Semi-transparent overlay on popups/alerts (backdrop for modals)
+ * - SC - 2nd: Background for text input fields (search bars, form inputs)
+ */
+
+:root {
+  /* Text Colors (TC) */
+  --color-tc-highlight: #ffffff;
+  --color-tc-1st: #232323;
+  --color-tc-2nd: #7b7b7b;
+  --color-tc-red: #ff5454;
+  --color-tc-green: #4bb956;
+
+  /* Background Colors (BC) */
+  --color-bc-highlight: #232323;
+  --color-bc-1st: #ffffff;
+  --color-bc-2nd: #f6f6f6;
+  --color-bc-3rd: #eeeeee;
+  --color-bc-4th: #e4e4e4;
+  --color-bc-accent: #fef991;
+
+  /* Shading Colors (SC) */
+  --color-sc-1st: rgba(0, 0, 0, 0.5);
+  --color-sc-2nd: rgba(35, 35, 35, 0.08);
+
+  /* Semantic aliases for common use cases */
+  --color-text-primary: var(--color-tc-1st);
+  --color-text-secondary: var(--color-tc-2nd);
+  --color-text-inverse: var(--color-tc-highlight);
+  --color-text-success: var(--color-tc-green);
+  --color-text-error: var(--color-tc-red);
+
+  --color-bg-page: var(--color-bc-3rd);
+  --color-bg-surface: var(--color-bc-1st);
+  --color-bg-surface-secondary: var(--color-bc-2nd);
+  --color-bg-elevated: var(--color-bc-4th);
+  --color-bg-accent: var(--color-bc-accent);
+
+  --color-border-default: var(--color-bc-4th);
+  --color-border-subtle: rgba(35, 35, 35, 0.1);
+
+  /* Legacy color mappings for backward compatibility */
+  --color-primary: var(--color-bc-highlight);
+  --color-primary-text: var(--color-tc-highlight);
+  --color-success: var(--color-tc-green);
+  --color-error: var(--color-tc-red);
+  --color-warning: var(--color-tc-red);
+}
