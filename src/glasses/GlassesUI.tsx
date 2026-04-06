@@ -1036,12 +1036,6 @@ function getSelectedSender(state: AppState): string {
   return truncateName(msg?.senderName || "Unknown", 20);
 }
 
-function buildQuickReplyItems(): string[] {
-  return [...QUICK_REPLIES, QUICK_REPLY_CANCEL].map((item) =>
-    truncate(stripUnsupportedChars(item), 64),
-  );
-}
-
 function buildVoiceCardContent(state: AppState): string {
   const sender = getSelectedSender(state);
   const transcript = stripUnsupportedChars(state.voiceTranscript.trim());
@@ -1382,6 +1376,12 @@ export function GlassesUI({
           imageObject: [],
         }),
       );
+      // Native overlays replace the whole glasses page container, so the
+      // cached base layout must be invalidated before the conversation is
+      // rendered again.
+      glassesLayoutRef.current = null;
+      glassesTextRef.current = "";
+      glassesChatIconSignatureRef.current = "";
     } catch (e) {
       console.warn("[GlassesUI] Failed to clear native overlay:", e);
     }
@@ -1524,7 +1524,10 @@ export function GlassesUI({
   const showQuickReplyOverlay = useCallback(async () => {
     const sender = getSelectedSender(stateRef.current);
     const quickReplyTitle = `Reply to ${sender}`;
-    const replyItems = buildQuickReplyItems();
+    const replyValues = [...QUICK_REPLIES, QUICK_REPLY_CANCEL];
+    const replyItems = replyValues.map((item) =>
+      truncate(stripUnsupportedChars(item), 64),
+    );
     const overlaySignature = `${quickReplyTitle}::${replyItems.join("|")}`;
 
     if (
@@ -1586,14 +1589,22 @@ export function GlassesUI({
         return;
       }
 
-      const action = mapGlassEvent(event);
-      if (action?.type === "GO_BACK") {
-        void hideNativeOverlay();
-        setState((s) => ({
-          ...s,
-          currentScreen: "messages",
-          highlightedIndex: 0,
-        }));
+      // Check for double-click directly from jsonData event type (for native list items)
+      const rawEventType = event.jsonData?.eventType;
+      const isDoubleClick =
+        rawEventType === OsEventTypeList.DOUBLE_CLICK_EVENT ||
+        rawEventType === "DOUBLE_CLICK_EVENT" ||
+        rawEventType === 3;
+
+      if (isDoubleClick) {
+        void (async () => {
+          await hideNativeOverlay();
+          setState((s) => ({
+            ...s,
+            currentScreen: "messages",
+            highlightedIndex: 0,
+          }));
+        })();
         return;
       }
 
@@ -1601,21 +1612,29 @@ export function GlassesUI({
         return;
       }
 
+      const selectedIndex = event.listEvent.currentSelectItemIndex;
       const selectedName = event.listEvent.currentSelectItemName;
-      if (!selectedName) {
+      const selectedReply =
+        typeof selectedIndex === "number" && selectedIndex >= 0 && selectedIndex < replyValues.length
+          ? replyValues[selectedIndex]
+          : selectedName;
+
+      if (!selectedReply) {
         return;
       }
-      if (selectedName === QUICK_REPLY_CANCEL) {
-        void hideNativeOverlay();
-        setState((s) => ({
-          ...s,
-          currentScreen: "messages",
-          highlightedIndex: 0,
-        }));
+      if (selectedReply === QUICK_REPLY_CANCEL) {
+        void (async () => {
+          await hideNativeOverlay();
+          setState((s) => ({
+            ...s,
+            currentScreen: "messages",
+            highlightedIndex: 0,
+          }));
+        })();
         return;
       }
 
-      if (selectedName === "Voice") {
+      if (selectedReply === "Voice") {
         setState((s) => ({
           ...s,
           currentScreen: "voiceReply",
@@ -1627,13 +1646,15 @@ export function GlassesUI({
         return;
       }
 
-      void hideNativeOverlay();
-      sendMessage(selectedName);
-      setState((s) => ({
-        ...s,
-        currentScreen: "messages",
-        highlightedIndex: 0,
-      }));
+      void (async () => {
+        await hideNativeOverlay();
+        sendMessage(selectedReply);
+        setState((s) => ({
+          ...s,
+          currentScreen: "messages",
+          highlightedIndex: 0,
+        }));
+      })();
     });
   }, [hideNativeOverlay, startVoiceReply, stopNativeOverlayEvents]);
 
