@@ -11,7 +11,20 @@ import {
   BeeperClient,
   BeeperMessage,
 } from "../services/beeperClient";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DisplayLine, GlassAction, GlassNavState } from "even-toolkit/types";
+import {
+  activateKeepAlive,
+  deactivateKeepAlive,
+} from "even-toolkit/keep-alive";
+import { mapGlassEvent } from "even-toolkit/action-map";
+import { buildActionBar, buildStaticActionBar } from "even-toolkit/action-bar";
+import { bindKeyboard } from "even-toolkit/keyboard";
+import { useCallback, useEffect, useState, useRef } from "react";
+
+import { buildHeaderLine } from "even-toolkit/text-utils";
+import { line } from "even-toolkit/types";
+import { useFlashPhase } from "even-toolkit/useFlashPhase";
+import { useGlasses } from "even-toolkit/useGlasses";
 import {
   CreateStartUpPageContainer,
   waitForEvenAppBridge,
@@ -21,7 +34,6 @@ import {
   ImageRawDataUpdate,
   ListContainerProperty,
   ListItemContainerProperty,
-  OsEventTypeList,
   RebuildPageContainer,
   TextContainerProperty,
   TextContainerUpgrade,
@@ -51,24 +63,8 @@ const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 const GLASSES_DISPLAY_WIDTH = 576;
 const GLASSES_DISPLAY_HEIGHT = 288;
 const CHAT_TEXT_PREFIX = "    ";
-
-export type LineStyle = "normal" | "meta" | "separator" | "inverted";
-
-export interface DisplayLine {
-  text: string;
-  inverted: boolean;
-  style: LineStyle;
-}
-
-export type GlassAction =
-  | { type: "HIGHLIGHT_MOVE"; direction: "up" | "down" }
-  | { type: "SELECT_HIGHLIGHTED" }
-  | { type: "GO_BACK" };
-
-export interface GlassNavState {
-  highlightedIndex: number;
-  screen: string;
-}
+const ENABLE_CUSTOM_GLASSES_RENDERER = false;
+const STARTUP_DELAY_MS = 1200; // Brief delay so OS registers the startup render
 
 const BASE_PAGE_CONTAINER = {
   OVERLAY_ID: 1,
@@ -108,31 +104,6 @@ const ICONS = {
   SELECTED: ">",
   BACK: "<",
   UNREAD: "[!",
-};
-
-const TAP_COOLDOWN_MS = 220;
-const TAP_DUPLICATE_DEBOUNCE_MS = 90;
-const DOUBLE_TAP_DUPLICATE_DEBOUNCE_MS = 140;
-const SCROLL_SUPPRESS_AFTER_TAP_MS = 110;
-const SAME_DIRECTION_DEBOUNCE_MS = 350;
-const DIRECTION_CHANGE_DEBOUNCE_MS = 50;
-const SCROLL_SUPPRESS_AFTER_TEXT_MS = 80;
-const FLASH_INTERVAL_MS = 500;
-
-let lastTapTime = 0;
-let lastTapKind: "tap" | "double" | null = null;
-let lastScrollTime = 0;
-let lastScrollDir: "up" | "down" | null = null;
-let textUpdateTime = 0;
-
-const keepAliveResources: {
-  audioCtx: AudioContext | null;
-  oscillator: OscillatorNode | null;
-  lockPromise: Promise<unknown> | null;
-} = {
-  audioCtx: null,
-  oscillator: null,
-  lockPromise: null,
 };
 
 // Quick reply presets (2 columns x 4 rows = 8 replies)
@@ -222,260 +193,8 @@ function stripUnsupportedChars(text: string): string {
 }
 
 // Helper: create a separator line (using meta style so text renders)
-function line(
-  text: string,
-  style: LineStyle = "normal",
-  inverted = false,
-): DisplayLine {
-  return { text, style, inverted };
-}
-
 function sep(): DisplayLine {
   return line(SEPARATOR_LINE, "meta");
-}
-
-function buildHeaderLine(title: string, actionBar: string): string {
-  return `${title}  ${actionBar}`;
-}
-
-function buildActionBar(
-  buttons: string[],
-  selectedIndex: number,
-  activeLabel: string | null,
-  flashPhase: boolean,
-): string {
-  const activeIdx = activeLabel ? buttons.indexOf(activeLabel) : -1;
-  return buttons
-    .map((name, i) => {
-      if (activeIdx === i) {
-        const left = flashPhase ? "▶" : "▷";
-        const right = flashPhase ? "◀" : "◁";
-        return `${left}${name}${right}`;
-      }
-      if (activeIdx < 0 && i === selectedIndex) {
-        return `▶${name}◀`;
-      }
-      return ` ${name} `;
-    })
-    .join(" ");
-}
-
-function buildStaticActionBar(buttons: string[], selectedIndex: number): string {
-  return buttons
-    .map((name, i) => (i === selectedIndex ? `▶${name}◀` : ` ${name} `))
-    .join(" ");
-}
-
-function tryConsumeTap(kind: "tap" | "double"): boolean {
-  const now = Date.now();
-  const elapsed = now - lastTapTime;
-  const duplicateMs =
-    kind === "double"
-      ? DOUBLE_TAP_DUPLICATE_DEBOUNCE_MS
-      : TAP_DUPLICATE_DEBOUNCE_MS;
-
-  if (kind === lastTapKind && elapsed < duplicateMs) {
-    return false;
-  }
-
-  if (elapsed < TAP_COOLDOWN_MS && lastTapKind !== null) {
-    return false;
-  }
-
-  lastTapTime = now;
-  lastTapKind = kind;
-  return true;
-}
-
-function isScrollSuppressed(): boolean {
-  return Date.now() - lastTapTime < SCROLL_SUPPRESS_AFTER_TAP_MS;
-}
-
-function notifyTextUpdate(): void {
-  textUpdateTime = Date.now();
-}
-
-function isScrollDebounced(direction: "up" | "down"): boolean {
-  const now = Date.now();
-
-  if (now - textUpdateTime < SCROLL_SUPPRESS_AFTER_TEXT_MS) {
-    return true;
-  }
-
-  const threshold =
-    direction === lastScrollDir
-      ? SAME_DIRECTION_DEBOUNCE_MS
-      : DIRECTION_CHANGE_DEBOUNCE_MS;
-
-  if (now - lastScrollTime < threshold) {
-    return true;
-  }
-
-  lastScrollTime = now;
-  lastScrollDir = direction;
-  return false;
-}
-
-function mapGlassEvent(event: EvenHubEvent): GlassAction | null {
-  if (!event) {
-    return null;
-  }
-
-  try {
-    const ev = event.listEvent ?? event.textEvent ?? event.sysEvent;
-    if (!ev) {
-      return null;
-    }
-
-    const eventType = ev.eventType ?? event.jsonData?.eventType;
-    switch (eventType) {
-      case OsEventTypeList.CLICK_EVENT:
-      case "CLICK_EVENT":
-      case undefined:
-      case 0:
-        return tryConsumeTap("tap") ? { type: "SELECT_HIGHLIGHTED" } : null;
-      case OsEventTypeList.DOUBLE_CLICK_EVENT:
-      case "DOUBLE_CLICK_EVENT":
-      case 3:
-        return tryConsumeTap("double") ? { type: "GO_BACK" } : null;
-      case OsEventTypeList.SCROLL_TOP_EVENT:
-      case "SCROLL_TOP_EVENT":
-      case 1:
-        if (isScrollDebounced("up") || isScrollSuppressed()) {
-          return null;
-        }
-        return { type: "HIGHLIGHT_MOVE", direction: "up" };
-      case OsEventTypeList.SCROLL_BOTTOM_EVENT:
-      case "SCROLL_BOTTOM_EVENT":
-      case 2:
-        if (isScrollDebounced("down") || isScrollSuppressed()) {
-          return null;
-        }
-        return { type: "HIGHLIGHT_MOVE", direction: "down" };
-      default:
-        // Some text containers report a bare textEvent for single press without eventType.
-        if (event.textEvent && eventType == null) {
-          return tryConsumeTap("tap") ? { type: "SELECT_HIGHLIGHTED" } : null;
-        }
-        // Handle list selection events (currentSelectItemIndex indicates list item selection)
-        if ((ev as { currentSelectItemIndex?: number }).currentSelectItemIndex != null) {
-          return tryConsumeTap("tap") ? { type: "SELECT_HIGHLIGHTED" } : null;
-        }
-        return null;
-    }
-  } catch {
-    return null;
-  }
-}
-
-function bindKeyboard(dispatch: (action: GlassAction) => void): () => void {
-  function isInteractive(element: HTMLElement): boolean {
-    const tag = element.tagName;
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
-      return true;
-    }
-    if (tag === "BUTTON" || tag === "A") {
-      return true;
-    }
-    return !!element.closest("button, a, [role=button]");
-  }
-
-  const keyHandler = (event: KeyboardEvent) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-
-    const tag = target.tagName;
-    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") {
-      return;
-    }
-
-    switch (event.key) {
-      case "ArrowUp":
-        event.preventDefault();
-        dispatch({ type: "HIGHLIGHT_MOVE", direction: "up" });
-        break;
-      case "ArrowDown":
-        event.preventDefault();
-        dispatch({ type: "HIGHLIGHT_MOVE", direction: "down" });
-        break;
-      case "Enter":
-        event.preventDefault();
-        dispatch({ type: "SELECT_HIGHLIGHTED" });
-        break;
-      case "Escape":
-      case "Backspace":
-        event.preventDefault();
-        dispatch({ type: "GO_BACK" });
-        break;
-    }
-  };
-
-  let lastWheelTime = 0;
-  const wheelHandler = (event: WheelEvent) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement) || isInteractive(target)) {
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastWheelTime < 250) {
-      return;
-    }
-
-    lastWheelTime = now;
-    if (event.deltaY > 0) {
-      dispatch({ type: "HIGHLIGHT_MOVE", direction: "down" });
-    } else if (event.deltaY < 0) {
-      dispatch({ type: "HIGHLIGHT_MOVE", direction: "up" });
-    }
-  };
-
-  document.addEventListener("keydown", keyHandler);
-  document.addEventListener("wheel", wheelHandler, { passive: true });
-
-  return () => {
-    document.removeEventListener("keydown", keyHandler);
-    document.removeEventListener("wheel", wheelHandler);
-  };
-}
-
-function activateKeepAlive(lockName = "evenglass_keep_alive"): void {
-  let audioCtx: AudioContext | null = null;
-  let oscillator: OscillatorNode | null = null;
-
-  try {
-    audioCtx = new AudioContext();
-    oscillator = audioCtx.createOscillator();
-    oscillator.frequency.value = 1;
-    const gain = audioCtx.createGain();
-    gain.gain.value = 0.001;
-    oscillator.connect(gain);
-    gain.connect(audioCtx.destination);
-    oscillator.start();
-  } catch {
-    audioCtx?.close().catch(() => undefined);
-    audioCtx = null;
-    oscillator = null;
-  }
-
-  keepAliveResources.audioCtx = audioCtx;
-  keepAliveResources.oscillator = oscillator;
-
-  if (navigator.locks) {
-    keepAliveResources.lockPromise = navigator.locks.request(lockName, () => {
-      return new Promise(() => undefined);
-    });
-  }
-}
-
-function deactivateKeepAlive(): void {
-  keepAliveResources.oscillator?.stop();
-  keepAliveResources.audioCtx?.close().catch(() => undefined);
-  keepAliveResources.oscillator = null;
-  keepAliveResources.audioCtx = null;
-  keepAliveResources.lockPromise = null;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -557,28 +276,45 @@ function truncateName(text: string, max: number): string {
 }
 
 // Calculate the scroll position to show maximum messages while keeping the bottom visible
-function getMessageLineCount(msg: BeeperMessage): number {
-  const sender = msg.isSender ? ">" : truncateName(msg.senderName || "?", 8);
-  const prefix = `[00:00] ${sender}: `;
-  const content = stripUnsupportedChars(msg.text || "[media]");
-  return wordWrap(content, DISPLAY_WIDTH - prefix.length).length;
-}
-
 function getMaxScrollForMessages(messages: BeeperMessage[]): number {
   if (messages.length === 0) return 0;
 
-  const linesForMessages = DISPLAY_LINES - 3; // header, separator, action bar
-  let usedLines = 0;
+  const LINES_FOR_MESSAGES = DISPLAY_LINES - 3; // header, separator, action bar
 
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const nextLineCount = getMessageLineCount(messages[i]);
-    if (usedLines + nextLineCount > linesForMessages) {
-      return Math.min(messages.length - 1, i + 1);
+  // Start from bottom and work backwards to find the scroll that shows max messages
+  // Keep going until adding the next message would overflow
+  let lastValidScroll = Math.max(0, messages.length - 1); // Default to bottom (1 msg)
+
+  for (let scroll = Math.max(0, messages.length - 1); scroll >= 0; scroll--) {
+    let lineCount = 0;
+
+    for (let i = scroll; i < messages.length; i++) {
+      const msg = messages[i];
+      const sender = msg.isSender
+        ? ">"
+        : truncateName(msg.senderName || "?", 8);
+      const prefix = `[00:00] ${sender}: `;
+      const content = stripUnsupportedChars(msg.text || "[media]");
+      const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
+
+      lineCount += wrappedLines.length;
+
+      // Stop counting once we've exceeded capacity
+      if (lineCount > LINES_FOR_MESSAGES) {
+        break;
+      }
     }
-    usedLines += nextLineCount;
+
+    if (lineCount <= LINES_FOR_MESSAGES) {
+      // This scroll position is valid - keep track of it
+      lastValidScroll = scroll;
+    } else {
+      // First invalid position - return the last valid one
+      return lastValidScroll;
+    }
   }
 
-  return 0;
+  return lastValidScroll;
 }
 
 // Word-wrap text to fit within maxWidth, breaking words as needed
@@ -664,25 +400,6 @@ function buildGlassesText(lines: DisplayLine[]): string {
     .join("\n");
 }
 
-function useFlashPhase(active: boolean): number {
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    if (!active) {
-      setTick(0);
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setTick((prev) => prev + 1);
-    }, FLASH_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, [active]);
-
-  return tick;
-}
-
 function getMaxIndex(state: AppState): number {
   switch (state.currentScreen) {
     case "accounts": {
@@ -708,7 +425,11 @@ function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
     webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
   };
 
-  return speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition || null;
+  return (
+    speechWindow.SpeechRecognition ||
+    speechWindow.webkitSpeechRecognition ||
+    null
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -792,7 +513,10 @@ function buildChatsDisplay(
   } else if (state.chats.length === 0) {
     lines.push(line("No chats found", "normal"));
   } else {
-    const { start, visible } = getVisibleChatWindow(state.chats, highlightedIdx);
+    const { start, visible } = getVisibleChatWindow(
+      state.chats,
+      highlightedIdx,
+    );
 
     visible.forEach((chat, idx) => {
       const globalIdx = start + idx;
@@ -813,8 +537,15 @@ function buildChatsDisplay(
   lines.push(sep());
 
   // Show current position in list
-  const posText = state.isLoading ? "" : `${highlightedIdx + 1}/${state.chats.length}`;
-  lines.push(line(buildStaticActionBar(["Back"], -1) + (posText ? "  " + posText : ""), "meta"));
+  const posText = state.isLoading
+    ? ""
+    : `${highlightedIdx + 1}/${state.chats.length}`;
+  lines.push(
+    line(
+      buildStaticActionBar(["Back"], -1) + (posText ? "  " + posText : ""),
+      "meta",
+    ),
+  );
 
   return lines;
 }
@@ -962,12 +693,19 @@ function buildQuickReplyDisplay(
     : "Unknown";
   lines.push(line(buildHeaderLine(`Reply: ${sender}`, ""), "inverted"));
 
-  const selectedReply = QUICK_REPLIES[Math.min(highlightedIdx, QUICK_REPLIES.length - 1)] || "";
-  const availableReplyRows = Math.max(0, DISPLAY_LINES - 1 - STICKY_FOOTER_LINES);
+  const selectedReply =
+    QUICK_REPLIES[Math.min(highlightedIdx, QUICK_REPLIES.length - 1)] || "";
+  const availableReplyRows = Math.max(
+    0,
+    DISPLAY_LINES - 1 - STICKY_FOOTER_LINES,
+  );
   const optionLines: DisplayLine[] = QUICK_REPLIES.map((reply, idx) => {
     const isSelected = idx === highlightedIdx;
     const prefix = isSelected ? ICONS.SELECTED : " ";
-    return line(`${prefix} ${truncate(reply, 34)}`, isSelected ? "inverted" : "normal");
+    return line(
+      `${prefix} ${truncate(reply, 34)}`,
+      isSelected ? "inverted" : "normal",
+    );
   });
 
   const visibleCount = Math.min(optionLines.length, availableReplyRows);
@@ -999,19 +737,27 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
   const status = state.voiceStatus || "Speak now";
   const isVoiceReady = state.voiceTranscript.trim().length > 0;
   const isSpeechUnavailable =
-    status === VOICE_NOT_CONFIGURED_STATUS || status === VOICE_NOT_SUPPORTED_STATUS;
+    status === VOICE_NOT_CONFIGURED_STATUS ||
+    status === VOICE_NOT_SUPPORTED_STATUS;
 
   lines.push(line(buildHeaderLine(`Voice: ${sender}`, ""), "inverted"));
 
   const voiceBody = state.voiceTranscript || status;
   const bodyLines = [
     line(
-      isVoiceReady ? "Review reply" : isSpeechUnavailable ? "Voice unavailable" : "Listening...",
+      isVoiceReady
+        ? "Review reply"
+        : isSpeechUnavailable
+          ? "Voice unavailable"
+          : "Listening...",
       "normal",
     ),
     line(truncate(voiceBody, 38), "normal"),
   ];
-  const availableBodyLines = Math.max(0, DISPLAY_LINES - 1 - STICKY_FOOTER_LINES);
+  const availableBodyLines = Math.max(
+    0,
+    DISPLAY_LINES - 1 - STICKY_FOOTER_LINES,
+  );
 
   lines.push(...bodyLines.slice(0, availableBodyLines));
   lines.push(sep());
@@ -1034,6 +780,12 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
 function getSelectedSender(state: AppState): string {
   const msg = state.messages[state.selectedMessageIndex];
   return truncateName(msg?.senderName || "Unknown", 20);
+}
+
+function buildQuickReplyItems(): string[] {
+  return [...QUICK_REPLIES, QUICK_REPLY_CANCEL].map((item) =>
+    truncate(stripUnsupportedChars(item), 64),
+  );
 }
 
 function buildVoiceCardContent(state: AppState): string {
@@ -1274,17 +1026,22 @@ export function GlassesUI({
   });
 
   // Ref to store saved state for use in effects
-  const savedStateRef = useRef<SavedState>({ selectedAccount: null, selectedChat: null });
+  const savedStateRef = useRef<SavedState>({
+    selectedAccount: null,
+    selectedChat: null,
+  });
   const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isVoiceCancelledRef = useRef<boolean>(false);
   const evenHubUnsubscribeRef = useRef<(() => void) | null>(null);
   const nativeOverlayEventUnsubscribeRef = useRef<(() => void) | null>(null);
   const nativeOverlayScreenRef = useRef<Screen | null>(null);
-  const quickReplyOverlaySignatureRef = useRef<string>("");
-  const voiceOverlaySignatureRef = useRef<string>("");
 
-  const messagesPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const chatsPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const messagesPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const chatsPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const isMessagesPollInFlightRef = useRef<boolean>(false);
   const isChatsPollInFlightRef = useRef<boolean>(false);
   const stateRef = useRef<AppState>(state);
@@ -1301,16 +1058,19 @@ export function GlassesUI({
   const glassesChatIconsEnabledRef = useRef<boolean>(false);
   const isRenderingGlassesRef = useRef<boolean>(false);
   const pendingGlassesRenderRef = useRef<boolean>(false);
+  const startupRenderCompleteRef = useRef<boolean>(false);
+  const startupDelayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [navVersion, setNavVersion] = useState(0);
 
   // Ref to prevent duplicate message refreshes right after sending
   const suppressReloadRef = useRef<boolean>(false);
-  const suppressReloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const beeper = useMemo(
-    () => (beeperConfig ? new BeeperClient(beeperConfig) : null),
-    [beeperConfig],
+  const suppressReloadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
   );
+
+  const beeper = beeperConfig ? new BeeperClient(beeperConfig) : null;
 
   useEffect(() => {
     stateRef.current = state;
@@ -1349,8 +1109,6 @@ export function GlassesUI({
       nativeOverlayEventUnsubscribeRef.current = null;
     }
     nativeOverlayScreenRef.current = null;
-    quickReplyOverlaySignatureRef.current = "";
-    voiceOverlaySignatureRef.current = "";
   }, []);
 
   const hideNativeOverlay = useCallback(async () => {
@@ -1376,12 +1134,6 @@ export function GlassesUI({
           imageObject: [],
         }),
       );
-      // Native overlays replace the whole glasses page container, so the
-      // cached base layout must be invalidated before the conversation is
-      // rendered again.
-      glassesLayoutRef.current = null;
-      glassesTextRef.current = "";
-      glassesChatIconSignatureRef.current = "";
     } catch (e) {
       console.warn("[GlassesUI] Failed to clear native overlay:", e);
     }
@@ -1401,7 +1153,7 @@ export function GlassesUI({
   }, [hideNativeOverlay, stopVoiceReply]);
 
   const submitVoiceReply = useCallback(async () => {
-    const transcript = stateRef.current.voiceTranscript.trim();
+    const transcript = state.voiceTranscript.trim();
     if (!transcript) {
       return;
     }
@@ -1417,10 +1169,14 @@ export function GlassesUI({
       voiceTranscript: "",
       voiceAudioBytes: 0,
     }));
-  }, [hideNativeOverlay, stopVoiceReply]);
+  }, [hideNativeOverlay, state.voiceTranscript, stopVoiceReply]);
 
   const startVoiceReply = useCallback(async () => {
-    if (!speechConfig?.baseUrl || !speechConfig?.token || !speechConfig?.model) {
+    if (
+      !speechConfig?.baseUrl ||
+      !speechConfig?.token ||
+      !speechConfig?.model
+    ) {
       setState((s) => ({
         ...s,
         currentScreen: "voiceReply",
@@ -1455,19 +1211,31 @@ export function GlassesUI({
     const bridge = await getBridge();
     if (bridge) {
       try {
-        evenHubUnsubscribeRef.current = bridge.onEvenHubEvent((event: EvenHubEvent) => {
-          if (event.listEvent) {
-            console.log("[GlassesUI] List selected:", event.listEvent.currentSelectItemName);
-          } else if (event.textEvent) {
-            console.log("[GlassesUI] Text event:", event.textEvent);
-          } else if (event.sysEvent) {
-            console.log("[GlassesUI] System event:", event.sysEvent.eventType);
-          } else if (event.audioEvent) {
-            const pcm = event.audioEvent.audioPcm;
-            const pcmLength = pcm?.length || 0;
-            console.log("[GlassesUI] Audio PCM length:", pcmLength);
-          }
-        });
+        evenHubUnsubscribeRef.current = bridge.onEvenHubEvent(
+          (event: EvenHubEvent) => {
+            if (event.listEvent) {
+              console.log(
+                "[GlassesUI] List selected:",
+                event.listEvent.currentSelectItemName,
+              );
+            } else if (event.textEvent) {
+              console.log("[GlassesUI] Text event:", event.textEvent);
+            } else if (event.sysEvent) {
+              console.log(
+                "[GlassesUI] System event:",
+                event.sysEvent.eventType,
+              );
+            } else if (event.audioEvent) {
+              const pcm = event.audioEvent.audioPcm;
+              const pcmLength = pcm?.length || 0;
+              console.log("[GlassesUI] Audio PCM length:", pcmLength);
+              setState((s) => ({
+                ...s,
+                voiceAudioBytes: s.voiceAudioBytes + pcmLength,
+              }));
+            }
+          },
+        );
         await bridge.audioControl(true);
       } catch (e) {
         console.warn("[GlassesUI] Failed to open microphone:", e);
@@ -1507,7 +1275,12 @@ export function GlassesUI({
     recognition.onend = () => {
       speechRecognitionRef.current = null;
       if (isVoiceCancelledRef.current) {
-        setState((s) => ({ ...s, voiceStatus: null, voiceTranscript: "", voiceAudioBytes: 0 }));
+        setState((s) => ({
+          ...s,
+          voiceStatus: null,
+          voiceTranscript: "",
+          voiceAudioBytes: 0,
+        }));
         return;
       }
 
@@ -1522,23 +1295,12 @@ export function GlassesUI({
   }, [speechConfig, stopVoiceReply]);
 
   const showQuickReplyOverlay = useCallback(async () => {
-    const sender = getSelectedSender(stateRef.current);
-    const quickReplyTitle = `Reply to ${sender}`;
-    const replyValues = [...QUICK_REPLIES, QUICK_REPLY_CANCEL];
-    const replyItems = replyValues.map((item) =>
-      truncate(stripUnsupportedChars(item), 64),
-    );
-    const overlaySignature = `${quickReplyTitle}::${replyItems.join("|")}`;
-
-    if (
-      nativeOverlayScreenRef.current === "quickReply" &&
-      quickReplyOverlaySignatureRef.current === overlaySignature
-    ) {
-      return;
-    }
-
     const bridge = await getBridge();
     if (!bridge) return;
+
+    const sender = getSelectedSender(stateRef.current);
+    const quickReplyTitle = `Reply to ${sender}`;
+    const replyItems = buildQuickReplyItems();
     const quickReplyTitleContainer = new TextContainerProperty({
       containerID: NATIVE_REPLY_CONTAINER.QUICK_TITLE_ID,
       containerName: NATIVE_REPLY_CONTAINER.QUICK_TITLE_NAME,
@@ -1583,96 +1345,70 @@ export function GlassesUI({
 
     stopNativeOverlayEvents();
     nativeOverlayScreenRef.current = "quickReply";
-    quickReplyOverlaySignatureRef.current = overlaySignature;
-    nativeOverlayEventUnsubscribeRef.current = bridge.onEvenHubEvent((event: EvenHubEvent) => {
-      if (nativeOverlayScreenRef.current !== "quickReply") {
-        return;
-      }
+    nativeOverlayEventUnsubscribeRef.current = bridge.onEvenHubEvent(
+      (event: EvenHubEvent) => {
+        if (nativeOverlayScreenRef.current !== "quickReply") {
+          return;
+        }
 
-      // Check for double-click directly from jsonData event type (for native list items)
-      const rawEventType = event.jsonData?.eventType;
-      const isDoubleClick =
-        rawEventType === OsEventTypeList.DOUBLE_CLICK_EVENT ||
-        rawEventType === "DOUBLE_CLICK_EVENT" ||
-        rawEventType === 3;
-
-      if (isDoubleClick) {
-        void (async () => {
-          await hideNativeOverlay();
+        const action = mapGlassEvent(event);
+        if (action?.type === "GO_BACK") {
+          void hideNativeOverlay();
           setState((s) => ({
             ...s,
             currentScreen: "messages",
             highlightedIndex: 0,
           }));
-        })();
-        return;
-      }
+          return;
+        }
 
-      if (!event.listEvent) {
-        return;
-      }
+        if (!event.listEvent) {
+          return;
+        }
 
-      const selectedIndex = event.listEvent.currentSelectItemIndex;
-      const selectedName = event.listEvent.currentSelectItemName;
-      const selectedReply =
-        typeof selectedIndex === "number" && selectedIndex >= 0 && selectedIndex < replyValues.length
-          ? replyValues[selectedIndex]
-          : selectedName;
-
-      if (!selectedReply) {
-        return;
-      }
-      if (selectedReply === QUICK_REPLY_CANCEL) {
-        void (async () => {
-          await hideNativeOverlay();
+        const selectedName = event.listEvent.currentSelectItemName;
+        if (!selectedName) {
+          return;
+        }
+        if (selectedName === QUICK_REPLY_CANCEL) {
+          void hideNativeOverlay();
           setState((s) => ({
             ...s,
             currentScreen: "messages",
             highlightedIndex: 0,
           }));
-        })();
-        return;
-      }
+          return;
+        }
 
-      if (selectedReply === "Voice") {
-        setState((s) => ({
-          ...s,
-          currentScreen: "voiceReply",
-          voiceStatus: "Starting mic...",
-          voiceTranscript: "",
-          voiceAudioBytes: 0,
-        }));
-        void startVoiceReply();
-        return;
-      }
+        if (selectedName === "Voice") {
+          setState((s) => ({
+            ...s,
+            currentScreen: "voiceReply",
+            voiceStatus: "Starting mic...",
+            voiceTranscript: "",
+            voiceAudioBytes: 0,
+          }));
+          void startVoiceReply();
+          return;
+        }
 
-      void (async () => {
-        await hideNativeOverlay();
-        sendMessage(selectedReply);
+        void hideNativeOverlay();
+        sendMessage(selectedName);
         setState((s) => ({
           ...s,
           currentScreen: "messages",
           highlightedIndex: 0,
         }));
-      })();
-    });
+      },
+    );
   }, [hideNativeOverlay, startVoiceReply, stopNativeOverlayEvents]);
 
   const showVoiceReplyOverlay = useCallback(async () => {
-    const voiceState = stateRef.current;
-    const voiceContent = buildVoiceCardContent(voiceState);
-    const showSend = voiceState.voiceTranscript.trim().length > 0;
-    const overlaySignature = `${showSend ? "send" : "listen"}::${voiceContent}`;
-
-    if (
-      nativeOverlayScreenRef.current === "voiceReply" &&
-      voiceOverlaySignatureRef.current === overlaySignature
-    ) {
-      return;
-    }
-
     const bridge = await getBridge();
     if (!bridge) return;
+
+    const voiceContent = buildVoiceCardContent(state);
+    const showSend = state.voiceTranscript.trim().length > 0;
     const containerTotalNum = showSend ? 2 : 1;
     const voiceCardContainer = new TextContainerProperty({
       containerID: NATIVE_REPLY_CONTAINER.VOICE_CARD_ID,
@@ -1720,25 +1456,29 @@ export function GlassesUI({
 
     stopNativeOverlayEvents();
     nativeOverlayScreenRef.current = "voiceReply";
-    voiceOverlaySignatureRef.current = overlaySignature;
-    nativeOverlayEventUnsubscribeRef.current = bridge.onEvenHubEvent((event: EvenHubEvent) => {
-      if (nativeOverlayScreenRef.current !== "voiceReply") {
-        return;
-      }
+    nativeOverlayEventUnsubscribeRef.current = bridge.onEvenHubEvent(
+      (event: EvenHubEvent) => {
+        if (nativeOverlayScreenRef.current !== "voiceReply") {
+          return;
+        }
 
-      if (event.listEvent && event.listEvent.currentSelectItemName === "Send") {
-        void submitVoiceReply();
-        return;
-      }
+        if (
+          event.listEvent &&
+          event.listEvent.currentSelectItemName === "Send"
+        ) {
+          void submitVoiceReply();
+          return;
+        }
 
-      if (event.textEvent || event.sysEvent) {
-        void dismissVoiceReply();
-      }
-    });
-  }, [dismissVoiceReply, stopNativeOverlayEvents, submitVoiceReply]);
+        if (event.textEvent || event.sysEvent) {
+          void dismissVoiceReply();
+        }
+      },
+    );
+  }, [dismissVoiceReply, state, stopNativeOverlayEvents, submitVoiceReply]);
 
-  // Flash tick for blinking action indicators
-  const flashTick = useFlashPhase(true);
+  // Flash phase for blinking action indicators
+  const flashPhase = useFlashPhase(true);
 
   // Demo mode: click timestamps tracked in onGlassAction
   const clickTimestamps = useRef<number[]>([]);
@@ -1776,10 +1516,14 @@ export function GlassesUI({
 
         if (savedState.selectedChat && !shouldUseDemo) {
           // We have a saved chat and real accounts - try to restore it
-          await restoreSavedChat(accounts, savedState.selectedAccount, savedState.selectedChat);
+          await restoreSavedChat(
+            accounts,
+            savedState.selectedAccount,
+            savedState.selectedChat,
+          );
         } else {
           // No saved chat or demo mode - set initial state normally
-          const initialChats = shouldUseDemo ? demoChatsRef.current : [];
+          const initialChats = shouldUseDemo ? getDemoChats() : [];
 
           setState((s) => ({
             ...s,
@@ -1797,7 +1541,10 @@ export function GlassesUI({
               void loadMessages(savedState.selectedChat);
             } else {
               // Chat no longer exists, go back to chats list
-              await saveState({ selectedAccount: savedState.selectedAccount, selectedChat: null });
+              await saveState({
+                selectedAccount: savedState.selectedAccount,
+                selectedChat: null,
+              });
               setState((s) => ({
                 ...s,
                 currentScreen: "chats",
@@ -1809,7 +1556,7 @@ export function GlassesUI({
         }
       } catch (e) {
         console.warn("[GlassesUI] Using demo data");
-        const demoChats = demoChatsRef.current;
+        const demoChats = getDemoChats();
 
         setState((s) => ({
           ...s,
@@ -1826,7 +1573,10 @@ export function GlassesUI({
             void loadMessages(savedState.selectedChat);
           } else {
             // Chat no longer exists, go back to chats list
-            await saveState({ selectedAccount: savedState.selectedAccount, selectedChat: null });
+            await saveState({
+              selectedAccount: savedState.selectedAccount,
+              selectedChat: null,
+            });
             setState((s) => ({
               ...s,
               currentScreen: "chats",
@@ -1841,14 +1591,14 @@ export function GlassesUI({
     async function restoreSavedChat(
       accounts: BeeperAccount[],
       savedAccountId: string | null,
-      savedChatId: string
+      savedChatId: string,
     ) {
       if (!beeper) return;
 
       try {
         // Load chats for the saved account (or all chats if no specific account)
         const result = await beeper.listChats(
-          savedAccountId ? { accountIDs: [savedAccountId] } : undefined
+          savedAccountId ? { accountIDs: [savedAccountId] } : undefined,
         );
         const loadedChats = result.chats;
 
@@ -1870,7 +1620,10 @@ export function GlassesUI({
           void loadMessages(savedChatId);
         } else {
           // Chat no longer exists, clear saved state and show chats for the account
-          await saveState({ selectedAccount: savedAccountId, selectedChat: null });
+          await saveState({
+            selectedAccount: savedAccountId,
+            selectedChat: null,
+          });
           setState((s) => ({
             ...s,
             accounts,
@@ -1884,7 +1637,10 @@ export function GlassesUI({
       } catch (err) {
         console.error("[GlassesUI] Failed to restore saved chat:", err);
         // Fall back to the conversations list
-        await saveState({ selectedAccount: savedAccountId, selectedChat: null });
+        await saveState({
+          selectedAccount: savedAccountId,
+          selectedChat: null,
+        });
         setState((s) => ({
           ...s,
           accounts,
@@ -1924,9 +1680,12 @@ export function GlassesUI({
         if (suppressReloadRef.current) {
           return;
         }
-        await loadMessages(selectedChatId, { preserveScroll: true, silent: true });
+        await loadMessages(selectedChatId, {
+          preserveScroll: true,
+          silent: true,
+        });
       } catch (e) {
-        console.warn('[GlassesUI] Message polling failed:', e);
+        console.warn("[GlassesUI] Message polling failed:", e);
       } finally {
         isMessagesPollInFlightRef.current = false;
       }
@@ -1955,9 +1714,12 @@ export function GlassesUI({
         if (nativeOverlayScreenRef.current) {
           return;
         }
-        await loadChats(state.selectedAccount, { silent: true, preserveExisting: true });
+        await loadChats(state.selectedAccount, {
+          silent: true,
+          preserveExisting: true,
+        });
       } catch (e) {
-        console.warn('[GlassesUI] Chat polling failed:', e);
+        console.warn("[GlassesUI] Chat polling failed:", e);
       } finally {
         isChatsPollInFlightRef.current = false;
       }
@@ -1982,6 +1744,13 @@ export function GlassesUI({
   }, [stopVoiceReply]);
 
   useEffect(() => {
+    if (!ENABLE_CUSTOM_GLASSES_RENDERER) {
+      if (nativeOverlayScreenRef.current) {
+        void hideNativeOverlay();
+      }
+      return;
+    }
+
     if (state.currentScreen === "quickReply") {
       void showQuickReplyOverlay();
       return;
@@ -2009,10 +1778,6 @@ export function GlassesUI({
 
   useEffect(() => {
     return () => {
-      if (suppressReloadTimeoutRef.current) {
-        clearTimeout(suppressReloadTimeoutRef.current);
-        suppressReloadTimeoutRef.current = null;
-      }
       stopNativeOverlayEvents();
     };
   }, [stopNativeOverlayEvents]);
@@ -2030,6 +1795,7 @@ export function GlassesUI({
   }, [state.selectedAccount, state.selectedChat, state.messageScrollOffset]);
 
   // Handle selection
+  // Note: highlightedIndex comes from nav state (useGlasses), not app state
   const handleSelect = useCallback(
     (s: AppState, highlightedIndex: number): Partial<AppState> => {
       const updates: Partial<AppState> = {};
@@ -2125,41 +1891,41 @@ export function GlassesUI({
   );
 
   // Handle back
-  const handleBack = useCallback((s: AppState): Partial<AppState> => {
-    const updates: Partial<AppState> = { highlightedIndex: 0 };
+  const handleBack = useCallback(
+    (s: AppState): Partial<AppState> => {
+      const updates: Partial<AppState> = { highlightedIndex: 0 };
 
-    switch (s.currentScreen) {
-      case "accounts":
-        // Can't go back
-        break;
-      case "chats":
-        updates.currentScreen = "accounts";
-        updates.selectedAccount = null;
-        break;
-      case "messages":
-        updates.currentScreen = "chats";
-        updates.selectedChat = null;
-        updates.messageScrollOffset = 0; // Reset scroll for next visit
-        break;
-      case "quickReply":
-        updates.currentScreen = "messages";
-        updates.voiceStatus = null;
-        updates.voiceTranscript = "";
-        updates.voiceAudioBytes = 0;
-        break;
-      case "voiceReply":
-        void dismissVoiceReply();
-        updates.voiceStatus = null;
-        updates.voiceTranscript = "";
-        updates.voiceAudioBytes = 0;
-        break;
-    }
+      switch (s.currentScreen) {
+        case "accounts":
+          // Can't go back
+          break;
+        case "chats":
+          updates.currentScreen = "accounts";
+          updates.selectedAccount = null;
+          break;
+        case "messages":
+          updates.currentScreen = "chats";
+          updates.selectedChat = null;
+          updates.messageScrollOffset = 0; // Reset scroll for next visit
+          break;
+        case "quickReply":
+          updates.currentScreen = "messages";
+          updates.voiceStatus = null;
+          updates.voiceTranscript = "";
+          updates.voiceAudioBytes = 0;
+          break;
+        case "voiceReply":
+          void dismissVoiceReply();
+          updates.voiceStatus = null;
+          updates.voiceTranscript = "";
+          updates.voiceAudioBytes = 0;
+          break;
+      }
 
-    return updates;
-  }, [dismissVoiceReply]);
-
-  const demoChatsRef = useRef<BeeperChat[]>(getDemoChats());
-  const demoMessagesRef = useRef<BeeperMessage[]>(getDemoMessages());
+      return updates;
+    },
+    [dismissVoiceReply],
+  );
 
   // Load chats
   async function loadChats(
@@ -2175,7 +1941,7 @@ export function GlassesUI({
     }
 
     if (state.demoMode) {
-      const demoChats = demoChatsRef.current;
+      const demoChats = getDemoChats();
       setState((s) => {
         const sameChats = areChatsEqual(s.chats, demoChats);
         if (sameChats && s.isLoading === false) {
@@ -2199,7 +1965,7 @@ export function GlassesUI({
         );
         chats = result.chats;
       }
-      const finalChats = chats.length > 0 ? chats : demoChatsRef.current;
+      const finalChats = chats.length > 0 ? chats : getDemoChats();
       setState((s) => {
         const sameChats = areChatsEqual(s.chats, finalChats);
         const sameLoading = options?.silent ? true : s.isLoading === false;
@@ -2215,7 +1981,7 @@ export function GlassesUI({
         };
       });
     } catch {
-      const demoChats = demoChatsRef.current;
+      const demoChats = getDemoChats();
       setState((s) => {
         const sameChats = areChatsEqual(s.chats, demoChats);
         const sameLoading = options?.silent ? true : s.isLoading === false;
@@ -2247,7 +2013,7 @@ export function GlassesUI({
     }
 
     if (state.demoMode) {
-      const demoMessages = demoMessagesRef.current;
+      const demoMessages = getDemoMessages();
       const initialScroll = getMaxScrollForMessages(demoMessages);
 
       setState((s) => {
@@ -2280,7 +2046,7 @@ export function GlassesUI({
         const result = await beeper.listMessages(chatId);
         messages = result.messages.reverse();
       }
-      const finalMessages = messages.length > 0 ? messages : demoMessagesRef.current;
+      const finalMessages = messages.length > 0 ? messages : getDemoMessages();
       const initialScroll = getMaxScrollForMessages(finalMessages);
 
       setState((s) => {
@@ -2305,7 +2071,7 @@ export function GlassesUI({
         };
       });
     } catch {
-      const demoMessages = demoMessagesRef.current;
+      const demoMessages = getDemoMessages();
       const initialScroll = getMaxScrollForMessages(demoMessages);
 
       setState((s) => {
@@ -2335,12 +2101,12 @@ export function GlassesUI({
   // Send message
   function sendMessage(text: string) {
     async function doSend() {
-      const selectedChatId = stateRef.current.selectedChat;
-      if (beeper && selectedChatId) {
+      if (beeper && state.selectedChat) {
         try {
-          await beeper.sendMessage(selectedChatId, { text });
+          await beeper.sendMessage(state.selectedChat, { text });
           console.log("[GlassesUI] Message sent, reloading messages:", text);
 
+          // Set suppress flag to prevent WebSocket from triggering another loadMessages
           suppressReloadRef.current = true;
           if (suppressReloadTimeoutRef.current) {
             clearTimeout(suppressReloadTimeoutRef.current);
@@ -2348,12 +2114,13 @@ export function GlassesUI({
           suppressReloadTimeoutRef.current = setTimeout(() => {
             suppressReloadRef.current = false;
             suppressReloadTimeoutRef.current = null;
-          }, 2000);
+          }, 2000); // Suppress for 2 seconds
 
-          void loadMessages(selectedChatId);
+          void loadMessages(state.selectedChat);
         } catch (e) {
           console.error("[GlassesUI] Send failed:", e);
-          void loadMessages(selectedChatId);
+          // Reload messages on failure to clear any pending state
+          void loadMessages(state.selectedChat);
         }
       } else {
         console.log("[GlassesUI] Would send:", text);
@@ -2363,14 +2130,18 @@ export function GlassesUI({
   }
 
   const getDisplayLines = useCallback(
-    (snapshot: AppState, nav: GlassNavState, flashPhase: boolean): DisplayLine[] => {
+    (snapshot: AppState, nav: GlassNavState): DisplayLine[] => {
       switch (snapshot.currentScreen) {
         case "accounts":
           return buildAccountsDisplay(snapshot, nav.highlightedIndex);
         case "chats":
           return buildChatsDisplay(snapshot, nav.highlightedIndex);
         case "messages":
-          return buildMessagesDisplay(snapshot, nav.highlightedIndex, flashPhase);
+          return buildMessagesDisplay(
+            snapshot,
+            nav.highlightedIndex,
+            flashPhase,
+          );
         case "quickReply":
           return buildQuickReplyDisplay(snapshot, nav.highlightedIndex);
         case "voiceReply":
@@ -2379,23 +2150,23 @@ export function GlassesUI({
           return [line("Even Messages", "inverted")];
       }
     },
-    [],
+    [flashPhase],
   );
 
   // Handle glass actions
   // Note: We use a ref to access latest handlers to avoid stale closure issues
   const handleSelectRef = useRef(handleSelect);
   const handleBackRef = useRef(handleBack);
-  
+
   // Update refs when handlers change
   useEffect(() => {
     handleSelectRef.current = handleSelect;
   }, [handleSelect]);
-  
+
   useEffect(() => {
     handleBackRef.current = handleBack;
   }, [handleBack]);
-  
+
   const onGlassAction = useCallback(
     (
       action: GlassAction,
@@ -2415,11 +2186,11 @@ export function GlassesUI({
           if (snapshot.currentScreen === "messages") {
             const messages = snapshot.messages;
             if (messages.length === 0) return nav;
-            
+
             const currentScroll = snapshot.messageScrollOffset;
             // Calculate max scroll based on actual display capacity
             const maxScroll = getMaxScrollForMessages(messages);
-            
+
             // Block scrolling beyond boundaries
             if (action.direction === "down" && currentScroll >= maxScroll) {
               return nav; // Already at bottom, do nothing
@@ -2427,8 +2198,9 @@ export function GlassesUI({
             if (action.direction === "up" && currentScroll <= 0) {
               return nav; // Already at top, do nothing
             }
-            
-            const newScroll = currentScroll + (action.direction === "down" ? 1 : -1);
+
+            const newScroll =
+              currentScroll + (action.direction === "down" ? 1 : -1);
             setState((s) => ({ ...s, messageScrollOffset: newScroll }));
             return nav;
           }
@@ -2450,18 +2222,20 @@ export function GlassesUI({
           const now = Date.now();
           clickTimestamps.current.push(now);
           clickTimestamps.current = clickTimestamps.current.filter(
-            t => now - t < DEMO_MODE_WINDOW_MS
+            (t) => now - t < DEMO_MODE_WINDOW_MS,
           );
-          
+
           // Check for 5 rapid clicks to toggle demo mode
           if (clickTimestamps.current.length >= DEMO_MODE_CLICKS) {
             clickTimestamps.current = [];
             setState((s) => {
               const newDemoMode = !s.demoMode;
-              console.log(`[GlassesUI] Demo mode ${newDemoMode ? 'ENABLED' : 'DISABLED'}`);
+              console.log(
+                `[GlassesUI] Demo mode ${newDemoMode ? "ENABLED" : "DISABLED"}`,
+              );
               // Reset to the conversations list when toggling demo mode
-              return { 
-                ...s, 
+              return {
+                ...s,
                 demoMode: newDemoMode,
                 currentScreen: "chats",
                 selectedAccount: null,
@@ -2473,7 +2247,7 @@ export function GlassesUI({
             });
             return nav;
           }
-          
+
           // Use ref to get latest handler and pass nav.highlightedIndex (source of truth)
           setState((s) => {
             const updates = handleSelectRef.current(s, nav.highlightedIndex);
@@ -2492,6 +2266,13 @@ export function GlassesUI({
       }
     },
     [], // Empty deps - we use refs to access latest handlers
+  );
+
+  const toDisplayData = useCallback(
+    (snapshot: AppState, nav: GlassNavState) => ({
+      lines: getDisplayLines(snapshot, nav),
+    }),
+    [getDisplayLines],
   );
 
   const ensureGlassesStartup = useCallback(async (bridge: EvenAppBridge) => {
@@ -2527,7 +2308,7 @@ export function GlassesUI({
           borderColor: 0,
           borderRadius: 0,
           paddingLength: 6,
-          content: "",
+          content: "Even Messages started\nPlease continue on phone",
           isEventCapture: 0,
         }),
       ],
@@ -2608,12 +2389,18 @@ export function GlassesUI({
     async (bridge: EvenAppBridge, snapshot: AppState, nav: GlassNavState) => {
       const lines = buildChatsDisplay(snapshot, nav.highlightedIndex);
       const text = buildGlassesText(lines);
-      const { visible } = getVisibleChatWindow(snapshot.chats, nav.highlightedIndex);
+      const { visible } = getVisibleChatWindow(
+        snapshot.chats,
+        nav.highlightedIndex,
+      );
       const platformIds = visible.map((chat) => chat.accountID);
       const iconSignature = platformIds.join("|");
       const iconRows = MAX_VISIBLE_ITEMS - 2;
-      const shouldRenderIcons = glassesChatIconsEnabledRef.current && visible.length > 0;
-      const targetLayout: "text" | "chats" = shouldRenderIcons ? "chats" : "text";
+      const shouldRenderIcons =
+        glassesChatIconsEnabledRef.current && visible.length > 0;
+      const targetLayout: "text" | "chats" = shouldRenderIcons
+        ? "chats"
+        : "text";
 
       if (targetLayout === "text") {
         await renderTextPage(bridge, text);
@@ -2706,7 +2493,10 @@ export function GlassesUI({
         glassesChatIconsEnabledRef.current = false;
         glassesLayoutRef.current = null;
         glassesChatIconSignatureRef.current = "";
-        console.warn("[GlassesUI] Disabling chat icons after image update failure:", e);
+        console.warn(
+          "[GlassesUI] Disabling chat icons after image update failure:",
+          e,
+        );
         await renderTextPage(bridge, text);
         return;
       }
@@ -2736,14 +2526,26 @@ export function GlassesUI({
     try {
       await ensureGlassesStartup(bridge);
 
+      // Delay first content render so the OS startup message is visible briefly
+      if (!startupRenderCompleteRef.current) {
+        if (!startupDelayTimeoutRef.current) {
+          startupDelayTimeoutRef.current = setTimeout(() => {
+            startupRenderCompleteRef.current = true;
+            startupDelayTimeoutRef.current = null;
+            void flushGlassesDisplay();
+          }, STARTUP_DELAY_MS);
+        }
+        isRenderingGlassesRef.current = false;
+        return;
+      }
+
       const snapshot = stateRef.current;
       const nav = navRef.current;
 
       if (snapshot.currentScreen === "chats") {
         await renderChatsPage(bridge, snapshot, nav);
       } else {
-        const flashPhase = flashTick % 2 === 0;
-        const lines = getDisplayLines(snapshot, nav, flashPhase);
+        const lines = getDisplayLines(snapshot, nav);
         const text = buildGlassesText(lines);
         await renderTextPage(bridge, text);
       }
@@ -2756,7 +2558,7 @@ export function GlassesUI({
         void flushGlassesDisplay();
       }
     }
-  }, [ensureGlassesStartup, flashTick, getDisplayLines, renderChatsPage, renderTextPage]);
+  }, [ensureGlassesStartup, getDisplayLines, renderChatsPage, renderTextPage]);
 
   useEffect(() => {
     navRef.current.screen = state.currentScreen;
@@ -2783,18 +2585,10 @@ export function GlassesUI({
     void flushGlassesDisplay();
   }, [state, navVersion, flushGlassesDisplay]);
 
-  const flushGlassesDisplayRef = useRef(flushGlassesDisplay);
-  const onGlassActionRef = useRef(onGlassAction);
-
   useEffect(() => {
-    flushGlassesDisplayRef.current = flushGlassesDisplay;
-  }, [flushGlassesDisplay]);
-
-  useEffect(() => {
-    onGlassActionRef.current = onGlassAction;
-  }, [onGlassAction]);
-
-  useEffect(() => {
+    if (!ENABLE_CUSTOM_GLASSES_RENDERER) {
+      return;
+    }
     let disposed = false;
     let unsubscribe: (() => void) | null = null;
 
@@ -2815,17 +2609,17 @@ export function GlassesUI({
           }
 
           const snapshot = stateRef.current;
-          const nextNav = onGlassActionRef.current(action, navRef.current, snapshot);
+          const nextNav = onGlassAction(action, navRef.current, snapshot);
           navRef.current = {
             ...nextNav,
             screen: stateRef.current.currentScreen,
           };
           setNavVersion((v) => v + 1);
-          void flushGlassesDisplayRef.current();
+          void flushGlassesDisplay();
         });
 
         await ensureGlassesStartup(bridge);
-        void flushGlassesDisplayRef.current();
+        void flushGlassesDisplay();
       } catch (e) {
         console.warn("[GlassesUI] Failed to initialize glasses bridge:", e);
       }
@@ -2834,13 +2628,13 @@ export function GlassesUI({
     initGlasses();
     const unbindKeyboard = bindKeyboard((action) => {
       const snapshot = stateRef.current;
-      const nextNav = onGlassActionRef.current(action, navRef.current, snapshot);
+      const nextNav = onGlassAction(action, navRef.current, snapshot);
       navRef.current = {
         ...nextNav,
         screen: stateRef.current.currentScreen,
       };
       setNavVersion((v) => v + 1);
-      void flushGlassesDisplayRef.current();
+      void flushGlassesDisplay();
     });
 
     return () => {
@@ -2853,10 +2647,60 @@ export function GlassesUI({
       glassesTextRef.current = "";
       glassesChatIconSignatureRef.current = "";
       glassesChatIconsEnabledRef.current = false;
+      startupRenderCompleteRef.current = false;
+      if (startupDelayTimeoutRef.current) {
+        clearTimeout(startupDelayTimeoutRef.current);
+        startupDelayTimeoutRef.current = null;
+      }
     };
-  }, [ensureGlassesStartup]);
+  }, [ensureGlassesStartup, flushGlassesDisplay, onGlassAction]);
+
+  if (!ENABLE_CUSTOM_GLASSES_RENDERER) {
+    return (
+      <ToolkitGlassesBridge
+        state={state}
+        currentScreen={state.currentScreen}
+        toDisplayData={toDisplayData}
+        onGlassAction={onGlassAction}
+      />
+    );
+  }
 
   // This is a headless component - renders nothing in DOM
+  return null;
+}
+
+function ToolkitGlassesBridge({
+  state,
+  currentScreen,
+  toDisplayData,
+  onGlassAction,
+}: {
+  state: AppState;
+  currentScreen: Screen;
+  toDisplayData: (
+    snapshot: AppState,
+    nav: GlassNavState,
+  ) => { lines: DisplayLine[] };
+  onGlassAction: (
+    action: GlassAction,
+    nav: GlassNavState,
+    snapshot: AppState,
+  ) => GlassNavState;
+}) {
+  const deriveScreen = useCallback(
+    (_path: string) => currentScreen,
+    [currentScreen],
+  );
+
+  useGlasses({
+    getSnapshot: () => state,
+    toDisplayData,
+    onGlassAction,
+    deriveScreen,
+    appName: "even-messages",
+  });
+
   return null;
 }
 
