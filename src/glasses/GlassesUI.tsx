@@ -10,6 +10,7 @@ import {
   BeeperChat,
   BeeperClient,
   BeeperMessage,
+  BeeperTextEntity,
 } from "../services/beeperClient";
 import { DisplayLine, GlassAction, GlassNavState } from "even-toolkit/types";
 import {
@@ -192,6 +193,86 @@ function stripUnsupportedChars(text: string): string {
     .replace(/[\u{1F700}-\u{1F77F}]/gu, ""); // Alchemical symbols
 }
 
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    const cleaned = url.replace(/^https?:\/\//, "").replace(/^www\./, "");
+    return cleaned.split("/")[0];
+  }
+}
+
+function formatMessageText(msg: BeeperMessage): string {
+  const text = msg.text ?? "";
+  if (!text || !msg.textEntities || msg.textEntities.length === 0) {
+    return text || "[media]";
+  }
+
+  type Entity =
+    | { type: "link"; from: number; to: number; label: string }
+    | { type: "mention"; from: number; to: number; label: string };
+
+  const entities: Entity[] = [];
+  function collect(list: BeeperTextEntity[]) {
+    for (const e of list) {
+      if (e.from == null || e.to == null) continue;
+
+      if (e.link) {
+        entities.push({
+          type: "link",
+          from: e.from,
+          to: e.to,
+          label: `[Link] ${extractDomain(e.link)}`,
+        });
+      } else if (e.mentionedUser) {
+        const raw = text.slice(e.from, e.to);
+        const label =
+          raw === "{{sender}}"
+            ? msg.senderName || "[User]"
+            : "[User]";
+        entities.push({ type: "mention", from: e.from, to: e.to, label });
+      }
+
+      if (e.children && e.children.length > 0) {
+        collect(e.children);
+      }
+    }
+  }
+  collect(msg.textEntities);
+
+  if (entities.length === 0) return text;
+
+  // Sort by from ascending, longer spans first (outer before inner)
+  entities.sort((a, b) => {
+    if (a.from !== b.from) return a.from - b.from;
+    return b.to - a.to;
+  });
+
+  // Merge overlapping: keep the first (outer) one, skip nested/overlapping
+  const merged: Entity[] = [];
+  for (const ent of entities) {
+    const last = merged[merged.length - 1];
+    if (last && ent.from < last.to) continue; // overlapping or nested
+    merged.push(ent);
+  }
+
+  // Build result string
+  let result = "";
+  let pos = 0;
+  for (const ent of merged) {
+    if (ent.from > pos) {
+      result += text.slice(pos, ent.from);
+    }
+    result += ent.label;
+    pos = ent.to;
+  }
+  if (pos < text.length) {
+    result += text.slice(pos);
+  }
+
+  return result;
+}
+
 // Helper: create a separator line (using meta style so text renders)
 function sep(): DisplayLine {
   return line(SEPARATOR_LINE, "meta");
@@ -201,7 +282,7 @@ function sep(): DisplayLine {
 // TYPES
 // ═══════════════════════════════════════════════════════════════
 
-type Screen = "accounts" | "chats" | "messages" | "quickReply" | "voiceReply";
+type Screen = "startup" | "accounts" | "chats" | "messages" | "quickReply" | "voiceReply";
 
 interface AppState {
   accounts: BeeperAccount[];
@@ -294,7 +375,7 @@ function getMaxScrollForMessages(messages: BeeperMessage[]): number {
         ? ">"
         : truncateName(msg.senderName || "?", 8);
       const prefix = `[00:00] ${sender}: `;
-      const content = stripUnsupportedChars(msg.text || "[media]");
+      const content = stripUnsupportedChars(formatMessageText(msg));
       const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
 
       lineCount += wrappedLines.length;
@@ -402,6 +483,8 @@ function buildGlassesText(lines: DisplayLine[]): string {
 
 function getMaxIndex(state: AppState): number {
   switch (state.currentScreen) {
+    case "startup":
+      return 0;
     case "accounts": {
       const uniqueAccounts = new Set(state.accounts.map((a) => a.accountID));
       return Math.max(0, uniqueAccounts.size); // +1 for "All Chats" at index 0
@@ -582,14 +665,14 @@ function buildMessagesDisplay(
   const scrollOffset = Math.min(state.messageScrollOffset, maxScroll);
 
   // Track line count: header (1) + separator (1) + action bar (1) = 3 fixed
-  // We need room for 1 more line for "[more above" indicator if needed
+  // We need room for 1 more line for the "more above" indicator if needed
   let usedLines = 3; // separator + action bar + buffer
   const MAX_MESSAGE_LINES = DISPLAY_LINES - usedLines;
 
   // Show indicator if there are more messages above
   const hasMoreAbove = scrollOffset > 0;
   if (hasMoreAbove) {
-    lines.push(line("[more above]", "meta"));
+    lines.push(line("          ▲", "meta"));
     usedLines++;
   }
 
@@ -613,7 +696,7 @@ function buildMessagesDisplay(
     const prefix = `[${time}] ${sender}: `;
 
     // Strip unsupported characters and wrap message content
-    const content = stripUnsupportedChars(msg.text || "[media]");
+    const content = stripUnsupportedChars(formatMessageText(msg));
     const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
     const msgLineCount = wrappedLines.length;
 
@@ -629,8 +712,28 @@ function buildMessagesDisplay(
   }
 
   // Render visible messages
-  if (visibleMessages.length === 0) {
+  if (totalMessages === 0) {
     lines.push(line("No messages yet - send one!", "normal"));
+  } else if (visibleMessages.length === 0) {
+    // The message at scrollOffset is too long to fit fully;
+    // render it truncated so the user sees something.
+    const msg = state.messages[scrollOffset];
+    const time = formatTime(msg.timestamp);
+    const sender = msg.isSender
+      ? ">"
+      : truncateName(msg.senderName || "?", 8);
+    const prefix = `[${time}] ${sender}: `;
+    const content = stripUnsupportedChars(formatMessageText(msg));
+    let wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
+    wrappedLines = wrappedLines.filter((l) => l.length > 0);
+    const capped = wrappedLines.slice(0, Math.max(1, MAX_MESSAGE_LINES));
+
+    if (capped.length > 0) {
+      lines.push(line(`${prefix}${capped[0]}`, "normal"));
+      for (let i = 1; i < capped.length; i++) {
+        lines.push(line(capped[i], "normal"));
+      }
+    }
   } else {
     visibleMessages.forEach((msg) => {
       const time = formatTime(msg.timestamp);
@@ -640,7 +743,7 @@ function buildMessagesDisplay(
       const prefix = `[${time}] ${sender}: `;
 
       // Strip unsupported characters and wrap message content
-      const content = stripUnsupportedChars(msg.text || "[media]");
+      const content = stripUnsupportedChars(formatMessageText(msg));
       let wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
       // Filter out any empty lines
       wrappedLines = wrappedLines.filter((line) => line.length > 0);
@@ -664,7 +767,7 @@ function buildMessagesDisplay(
   const lastShownIndex = scrollOffset + visibleMessages.length - 1;
   const hasMoreBelow = lastShownIndex < totalMessages - 1;
   if (hasMoreBelow) {
-    lines.push(line("[more below]", "meta"));
+    lines.push(line("          ▼", "meta"));
   }
 
   lines.push(sep());
@@ -774,6 +877,22 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
     ),
   );
 
+  return lines;
+}
+
+function buildStartupDisplay(): DisplayLine[] {
+  const lines: DisplayLine[] = [];
+  const time = new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  lines.push(line(buildHeaderLine("Even Messages", time), "inverted"));
+  lines.push(sep());
+  lines.push(line("  Loading...", "normal"));
+  lines.push(line("", "normal"));
+  lines.push(line("", "normal"));
+  lines.push(sep());
+  lines.push(line("", "meta"));
   return lines;
 }
 
@@ -1012,7 +1131,7 @@ export function GlassesUI({
     accounts: [],
     chats: [],
     messages: [],
-    currentScreen: "accounts",
+    currentScreen: "startup",
     selectedAccount: null,
     selectedChat: null,
     selectedMessageIndex: 0,
@@ -1486,21 +1605,35 @@ export function GlassesUI({
   // Load saved state and initial data
   useEffect(() => {
     async function init() {
+      const startTime = Date.now();
+      const MIN_STARTUP_MS = 1000;
+
       // First, load the saved state from storage
       const savedState = await loadSavedState();
       savedStateRef.current = savedState;
 
-      // Set initial state based on saved state
+      // Keep startup screen visible while loading
       setState((s) => ({
         ...s,
-        currentScreen: savedState.selectedChat ? "messages" : "chats",
         selectedAccount: savedState.selectedAccount,
         selectedChat: savedState.selectedChat,
         messageScrollOffset: savedState.chatScrollPosition || 0,
       }));
 
-      // Then load data
+      // Then load data (startup screen stays visible)
       await loadData(savedState);
+
+      // Enforce minimum startup visibility so the user sees the splash
+      const elapsed = Date.now() - startTime;
+      if (elapsed < MIN_STARTUP_MS) {
+        await new Promise((r) => setTimeout(r, MIN_STARTUP_MS - elapsed));
+      }
+
+      // Transition to the real screen now that data is ready
+      setState((s) => ({
+        ...s,
+        currentScreen: s.selectedChat ? "messages" : "chats",
+      }));
     }
 
     async function loadData(savedState: SavedState) {
@@ -1547,7 +1680,6 @@ export function GlassesUI({
               });
               setState((s) => ({
                 ...s,
-                currentScreen: "chats",
                 selectedAccount: savedState.selectedAccount,
                 selectedChat: null,
               }));
@@ -1579,7 +1711,6 @@ export function GlassesUI({
             });
             setState((s) => ({
               ...s,
-              currentScreen: "chats",
               selectedAccount: savedState.selectedAccount,
               selectedChat: null,
             }));
@@ -1613,7 +1744,6 @@ export function GlassesUI({
             chats: loadedChats,
             selectedAccount: savedAccountId,
             selectedChat: savedChatId,
-            currentScreen: "messages",
             highlightedIndex: 0,
             isLoading: true,
           }));
@@ -1630,7 +1760,6 @@ export function GlassesUI({
             chats: loadedChats,
             selectedAccount: savedAccountId,
             selectedChat: null,
-            currentScreen: "chats",
             isLoading: false,
           }));
         }
@@ -1645,7 +1774,6 @@ export function GlassesUI({
           ...s,
           accounts,
           chats: [],
-          currentScreen: "chats",
           selectedAccount: savedAccountId,
           selectedChat: null,
           isLoading: false,
@@ -1801,6 +1929,9 @@ export function GlassesUI({
       const updates: Partial<AppState> = {};
 
       switch (s.currentScreen) {
+        case "startup":
+          // Ignore input while loading
+          break;
         case "accounts": {
           // "All Chats" is index 0
           if (highlightedIndex === 0) {
@@ -1896,6 +2027,9 @@ export function GlassesUI({
       const updates: Partial<AppState> = { highlightedIndex: 0 };
 
       switch (s.currentScreen) {
+        case "startup":
+          // Can't go back while loading
+          break;
         case "accounts":
           // Can't go back
           break;
@@ -2134,6 +2268,8 @@ export function GlassesUI({
       switch (snapshot.currentScreen) {
         case "accounts":
           return buildAccountsDisplay(snapshot, nav.highlightedIndex);
+        case "startup":
+          return buildStartupDisplay();
         case "chats":
           return buildChatsDisplay(snapshot, nav.highlightedIndex);
         case "messages":

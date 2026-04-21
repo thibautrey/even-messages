@@ -332,7 +332,7 @@ export function DevModeUI({
   // Debug logs state
   const [showDebugLogs, setShowDebugLogs] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [newLogCount, setNewLogCount] = useState(0);
+  const [, setNewLogCount] = useState(0);
 
   // Subscribe to new logs
   useEffect(() => {
@@ -357,14 +357,6 @@ export function DevModeUI({
       onNewLog = null;
     };
   }, []);
-
-  // Reset new log count when opening logs
-  const handleToggleLogs = () => {
-    setShowDebugLogs(!showDebugLogs);
-    if (!showDebugLogs) {
-      setNewLogCount(0);
-    }
-  };
 
   const getLogTypeClass = (type: LogEntry["type"]) => {
     switch (type) {

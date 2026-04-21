@@ -52,6 +52,16 @@ export interface BeeperUser {
   isSelf?: boolean
 }
 
+export interface BeeperTextEntity {
+  from: number
+  to: number
+  link?: string
+  mentionedUser?: {
+    id: string
+  }
+  children?: BeeperTextEntity[]
+}
+
 export interface BeeperMessage {
   id: string
   chatID: string
@@ -62,6 +72,7 @@ export interface BeeperMessage {
   sortKey: string
   type: 'TEXT' | 'NOTICE' | 'IMAGE' | 'VIDEO' | 'VOICE' | 'AUDIO' | 'FILE' | 'STICKER' | 'LOCATION' | 'REACTION'
   text?: string
+  textEntities?: BeeperTextEntity[]
   isSender: boolean
   attachments?: BeeperAttachment[]
   isUnread?: boolean
