@@ -105,6 +105,203 @@ export interface SendMessagePayload {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function normalizeTextEntity(entity: unknown): BeeperTextEntity | null {
+  if (!isRecord(entity)) return null
+
+  const { from, to, link, mentionedUser, children } = entity
+  if (typeof from !== "number" || typeof to !== "number") {
+    return null
+  }
+
+  const normalized: BeeperTextEntity = { from, to }
+
+  if (typeof link === "string" && link.trim()) {
+    normalized.link = link
+  }
+
+  if (isRecord(mentionedUser) && typeof mentionedUser.id === "string") {
+    normalized.mentionedUser = { id: mentionedUser.id }
+  }
+
+  if (Array.isArray(children)) {
+    const normalizedChildren = children
+      .map(normalizeTextEntity)
+      .filter((child): child is BeeperTextEntity => child !== null)
+    if (normalizedChildren.length > 0) {
+      normalized.children = normalizedChildren
+    }
+  }
+
+  return normalized
+}
+
+function parseStructuredTextPayload(rawText?: string): {
+  text: string
+  textEntities: BeeperTextEntity[]
+} | null {
+  if (!rawText) return null
+
+  const trimmed = rawText.trim()
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!isRecord(parsed) || typeof parsed.text !== "string") {
+      return null
+    }
+
+    const textEntities = Array.isArray(parsed.textEntities)
+      ? parsed.textEntities
+          .map(normalizeTextEntity)
+          .filter((entity): entity is BeeperTextEntity => entity !== null)
+      : []
+
+    return {
+      text: parsed.text,
+      textEntities,
+    }
+  } catch {
+    return null
+  }
+}
+
+function getNormalizedMessageTextParts(msg: BeeperMessage): {
+  text: string
+  textEntities: BeeperTextEntity[]
+} {
+  const embedded = parseStructuredTextPayload(msg.text)
+  const text = stripReactionActorPrefix(
+    msg,
+    embedded?.text ?? msg.text ?? "",
+  )
+  const textEntities =
+    msg.textEntities && msg.textEntities.length > 0
+      ? msg.textEntities
+      : embedded?.textEntities ?? []
+
+  return { text, textEntities }
+}
+
+function stripReactionActorPrefix(msg: BeeperMessage, text: string): string {
+  if (msg.type !== "REACTION" || !text) {
+    return text
+  }
+
+  const candidates = [msg.senderName, msg.senderID]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .sort((a, b) => b.length - a.length)
+
+  for (const actor of candidates) {
+    if (text.startsWith(`${actor} `)) {
+      return text.slice(actor.length + 1)
+    }
+  }
+
+  return text
+}
+
+function normalizeMessage(message: BeeperMessage): BeeperMessage {
+  const embedded = parseStructuredTextPayload(message.text)
+  if (!embedded) {
+    return message
+  }
+
+  return {
+    ...message,
+    text: embedded.text,
+    textEntities:
+      message.textEntities && message.textEntities.length > 0
+        ? message.textEntities
+        : embedded.textEntities,
+  }
+}
+
+function extractDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "")
+  } catch {
+    const cleaned = url.replace(/^https?:\/\//, "").replace(/^www\./, "")
+    return cleaned.split("/")[0]
+  }
+}
+
+export function formatMessageText(msg: BeeperMessage): string {
+  const { text, textEntities } = getNormalizedMessageTextParts(msg)
+  if (!text || textEntities.length === 0) {
+    return text || "[media]"
+  }
+
+  type Entity =
+    | { type: "link"; from: number; to: number; label: string }
+    | { type: "mention"; from: number; to: number; label: string }
+
+  const entities: Entity[] = []
+  function collect(list: BeeperTextEntity[]) {
+    for (const e of list) {
+      if (e.from == null || e.to == null) continue
+
+      if (e.link) {
+        entities.push({
+          type: "link",
+          from: e.from,
+          to: e.to,
+          label: `[Link] ${extractDomain(e.link)}`,
+        })
+      } else if (e.mentionedUser) {
+        const raw = text.slice(e.from, e.to)
+        const label =
+          raw === "{{sender}}"
+            ? msg.senderName || msg.senderID || "[User]"
+            : "[User]"
+        entities.push({ type: "mention", from: e.from, to: e.to, label })
+      }
+
+      if (e.children && e.children.length > 0) {
+        collect(e.children)
+      }
+    }
+  }
+  collect(textEntities)
+
+  if (entities.length === 0) return text
+
+  // Sort by from ascending, longer spans first (outer before inner)
+  entities.sort((a, b) => {
+    if (a.from !== b.from) return a.from - b.from
+    return b.to - a.to
+  })
+
+  // Merge overlapping: keep the first (outer) one, skip nested/overlapping
+  const merged: Entity[] = []
+  for (const ent of entities) {
+    const last = merged[merged.length - 1]
+    if (last && ent.from < last.to) continue // overlapping or nested
+    merged.push(ent)
+  }
+
+  // Build result string
+  let result = ""
+  let pos = 0
+  for (const ent of merged) {
+    if (ent.from > pos) {
+      result += text.slice(pos, ent.from)
+    }
+    result += ent.label
+    pos = ent.to
+  }
+  if (pos < text.length) {
+    result += text.slice(pos)
+  }
+
+  return result
+}
+
 /**
  * Beeper Desktop API Client
  */
@@ -230,7 +427,7 @@ export class BeeperClient {
     const data = await response.json()
     // API returns 'items' not 'messages'
     return {
-      messages: data.items || data.messages || [],
+      messages: (data.items || data.messages || []).map(normalizeMessage),
       cursor: data.oldestCursor || data.cursor,
     }
   }
@@ -280,7 +477,13 @@ export class BeeperClient {
       throw new Error(`Failed to search messages: ${response.statusText}`)
     }
     
-    return response.json()
+    const data = await response.json()
+    return {
+      ...data,
+      messages: Array.isArray(data.messages)
+        ? data.messages.map(normalizeMessage)
+        : [],
+    }
   }
 
   /**

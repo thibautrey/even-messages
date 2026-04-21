@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   BeeperAccount,
   BeeperChat,
+  formatMessageText,
   getApiConfig,
   listSpeechProviderModels,
   type SpeechApiConfig,
@@ -1182,7 +1183,7 @@ function MessagesView({
 
     // Text message
     if (msg.text && msg.text.trim()) {
-      return msg.text;
+      return formatMessageText(msg);
     }
 
     // Media message - show type indicator
@@ -1216,7 +1217,7 @@ function MessagesView({
 
     // Notice/system message
     if (msg.type === "NOTICE") {
-      return msg.text || "[Notice]";
+      return formatMessageText(msg) || "[Notice]";
     }
 
     // Reaction

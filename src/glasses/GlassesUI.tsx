@@ -10,7 +10,7 @@ import {
   BeeperChat,
   BeeperClient,
   BeeperMessage,
-  BeeperTextEntity,
+  formatMessageText,
 } from "../services/beeperClient";
 import { DisplayLine, GlassAction, GlassNavState } from "even-toolkit/types";
 import {
@@ -18,13 +18,12 @@ import {
   deactivateKeepAlive,
 } from "even-toolkit/keep-alive";
 import { mapGlassEvent } from "even-toolkit/action-map";
-import { buildActionBar, buildStaticActionBar } from "even-toolkit/action-bar";
+import { buildStaticActionBar } from "even-toolkit/action-bar";
 import { bindKeyboard } from "even-toolkit/keyboard";
 import { useCallback, useEffect, useState, useRef } from "react";
 
 import { buildHeaderLine } from "even-toolkit/text-utils";
 import { line } from "even-toolkit/types";
-import { useFlashPhase } from "even-toolkit/useFlashPhase";
 import { useGlasses } from "even-toolkit/useGlasses";
 import {
   CreateStartUpPageContainer,
@@ -123,6 +122,9 @@ const QUICK_REPLIES = [
 const QUICK_REPLY_CANCEL = "Cancel";
 const VOICE_NOT_CONFIGURED_STATUS = "Speech not configured in Settings";
 const VOICE_NOT_SUPPORTED_STATUS = "Live mic transcription unavailable";
+const MESSAGE_DETAIL_REBUILD_MAX_CHARS = 950;
+const MESSAGE_DETAIL_UPGRADE_MAX_CHARS = 2000;
+const NATIVE_OVERLAY_EVENT_DEBOUNCE_MS = 250;
 
 const NATIVE_REPLY_CONTAINER = {
   QUICK_TITLE_ID: 201,
@@ -133,6 +135,13 @@ const NATIVE_REPLY_CONTAINER = {
   QUICK_LIST_NAME: "reply-list",
   VOICE_CARD_NAME: "voice-card",
   VOICE_SEND_NAME: "voice-send",
+} as const;
+
+const MESSAGE_DETAIL_CONTAINER = {
+  TEXT_ID: 221,
+  TEXT_NAME: "message-detail-text",
+  ACTION_LIST_ID: 222,
+  ACTION_LIST_NAME: "message-detail-actions",
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
@@ -193,86 +202,6 @@ function stripUnsupportedChars(text: string): string {
     .replace(/[\u{1F700}-\u{1F77F}]/gu, ""); // Alchemical symbols
 }
 
-function extractDomain(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    const cleaned = url.replace(/^https?:\/\//, "").replace(/^www\./, "");
-    return cleaned.split("/")[0];
-  }
-}
-
-function formatMessageText(msg: BeeperMessage): string {
-  const text = msg.text ?? "";
-  if (!text || !msg.textEntities || msg.textEntities.length === 0) {
-    return text || "[media]";
-  }
-
-  type Entity =
-    | { type: "link"; from: number; to: number; label: string }
-    | { type: "mention"; from: number; to: number; label: string };
-
-  const entities: Entity[] = [];
-  function collect(list: BeeperTextEntity[]) {
-    for (const e of list) {
-      if (e.from == null || e.to == null) continue;
-
-      if (e.link) {
-        entities.push({
-          type: "link",
-          from: e.from,
-          to: e.to,
-          label: `[Link] ${extractDomain(e.link)}`,
-        });
-      } else if (e.mentionedUser) {
-        const raw = text.slice(e.from, e.to);
-        const label =
-          raw === "{{sender}}"
-            ? msg.senderName || "[User]"
-            : "[User]";
-        entities.push({ type: "mention", from: e.from, to: e.to, label });
-      }
-
-      if (e.children && e.children.length > 0) {
-        collect(e.children);
-      }
-    }
-  }
-  collect(msg.textEntities);
-
-  if (entities.length === 0) return text;
-
-  // Sort by from ascending, longer spans first (outer before inner)
-  entities.sort((a, b) => {
-    if (a.from !== b.from) return a.from - b.from;
-    return b.to - a.to;
-  });
-
-  // Merge overlapping: keep the first (outer) one, skip nested/overlapping
-  const merged: Entity[] = [];
-  for (const ent of entities) {
-    const last = merged[merged.length - 1];
-    if (last && ent.from < last.to) continue; // overlapping or nested
-    merged.push(ent);
-  }
-
-  // Build result string
-  let result = "";
-  let pos = 0;
-  for (const ent of merged) {
-    if (ent.from > pos) {
-      result += text.slice(pos, ent.from);
-    }
-    result += ent.label;
-    pos = ent.to;
-  }
-  if (pos < text.length) {
-    result += text.slice(pos);
-  }
-
-  return result;
-}
-
 // Helper: create a separator line (using meta style so text renders)
 function sep(): DisplayLine {
   return line(SEPARATOR_LINE, "meta");
@@ -282,7 +211,7 @@ function sep(): DisplayLine {
 // TYPES
 // ═══════════════════════════════════════════════════════════════
 
-type Screen = "startup" | "accounts" | "chats" | "messages" | "quickReply" | "voiceReply";
+type Screen = "startup" | "accounts" | "chats" | "messages" | "quickReply" | "voiceReply" | "messageDetail";
 
 interface AppState {
   accounts: BeeperAccount[];
@@ -295,6 +224,7 @@ interface AppState {
   highlightedIndex: number;
   isLoading: boolean;
   messageScrollOffset: number; // For scrolling through messages
+  messageDetailScrollOffset: number;
   demoMode: boolean; // Easter egg: force demo mode with fake data
   voiceStatus: string | null;
   voiceTranscript: string;
@@ -356,94 +286,25 @@ function truncateName(text: string, max: number): string {
   return result.slice(0, max);
 }
 
+// Convert ASCII to fullwidth for consistent rendering on G2 proportional font.
+// The glasses firmware uses a proportional font where ASCII characters have
+// varying widths. CJK fullwidth characters are all the same width, so
+// converting display text ensures column alignment works correctly.
+// See: https://github.com/nickustinov/even-g2-notes/blob/main/docs/display.md
+function toFullwidth(str: string): string {
+  return str.replace(/[\x20-\x7E]/g, (ch) =>
+    ch === " " ? "\u3000" : String.fromCharCode(ch.charCodeAt(0) + 0xfee0),
+  );
+}
+
 // Calculate the scroll position to show maximum messages while keeping the bottom visible
-function getMaxScrollForMessages(messages: BeeperMessage[]): number {
-  if (messages.length === 0) return 0;
-
-  const LINES_FOR_MESSAGES = DISPLAY_LINES - 3; // header, separator, action bar
-
-  // Start from bottom and work backwards to find the scroll that shows max messages
-  // Keep going until adding the next message would overflow
-  let lastValidScroll = Math.max(0, messages.length - 1); // Default to bottom (1 msg)
-
-  for (let scroll = Math.max(0, messages.length - 1); scroll >= 0; scroll--) {
-    let lineCount = 0;
-
-    for (let i = scroll; i < messages.length; i++) {
-      const msg = messages[i];
-      const sender = msg.isSender
-        ? ">"
-        : truncateName(msg.senderName || "?", 8);
-      const prefix = `[00:00] ${sender}: `;
-      const content = stripUnsupportedChars(formatMessageText(msg));
-      const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
-
-      lineCount += wrappedLines.length;
-
-      // Stop counting once we've exceeded capacity
-      if (lineCount > LINES_FOR_MESSAGES) {
-        break;
-      }
-    }
-
-    if (lineCount <= LINES_FOR_MESSAGES) {
-      // This scroll position is valid - keep track of it
-      lastValidScroll = scroll;
-    } else {
-      // First invalid position - return the last valid one
-      return lastValidScroll;
-    }
-  }
-
-  return lastValidScroll;
+function getMessagePreview(msg: BeeperMessage): string {
+  const content = stripUnsupportedChars(formatMessageText(msg));
+  // Flatten newlines for single-line preview
+  return content.replace(/\r\n/g, " ").replace(/\n/g, " ").replace(/\r/g, " ");
 }
 
 // Word-wrap text to fit within maxWidth, breaking words as needed
-function wordWrap(text: string, maxWidth: number): string[] {
-  if (!text || text.length === 0) return [""];
-  if (text.length <= maxWidth) return [text];
-
-  const lines: string[] = [];
-  let currentLine = "";
-
-  for (const word of text.split(" ")) {
-    if (!word) continue;
-
-    // If single word is longer than maxWidth, break it mid-word
-    if (word.length > maxWidth) {
-      if (currentLine) {
-        lines.push(currentLine);
-        currentLine = "";
-      }
-      // Break long word into chunks (no hyphen, just clean break)
-      let remaining = word;
-      while (remaining.length > maxWidth) {
-        lines.push(remaining.slice(0, maxWidth));
-        remaining = remaining.slice(maxWidth);
-      }
-      currentLine = remaining;
-      continue;
-    }
-
-    // Check if adding this word would exceed maxWidth
-    const testLine = currentLine ? currentLine + " " + word : word;
-    if (testLine.length > maxWidth) {
-      if (currentLine) {
-        lines.push(currentLine);
-      }
-      currentLine = word;
-    } else {
-      currentLine = testLine;
-    }
-  }
-
-  if (currentLine) {
-    lines.push(currentLine);
-  }
-
-  return lines.length > 0 ? lines : [text];
-}
-
 function formatTime(timestamp: string): string {
   return new Date(timestamp)
     .toLocaleTimeString([], {
@@ -467,8 +328,39 @@ function getVisibleChatWindow(
   };
 }
 
+function wrapText(text: string, maxWidth: number): string[] {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const paragraphs = normalized.split("\n");
+  const lines: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph) {
+      lines.push("");
+      continue;
+    }
+
+    let remaining = paragraph;
+    while (remaining.length > maxWidth) {
+      let breakAt = remaining.lastIndexOf(" ", maxWidth);
+      if (breakAt <= 0) {
+        breakAt = maxWidth;
+      }
+      lines.push(remaining.slice(0, breakAt).trimEnd());
+      remaining = remaining.slice(breakAt).trimStart();
+    }
+    lines.push(remaining);
+  }
+
+  return lines.length > 0 ? lines : [""];
+}
+
+function getMessageDetailWrappedBody(msg: BeeperMessage): string[] {
+  const body = stripUnsupportedChars(formatMessageText(msg));
+  return wrapText(body, DISPLAY_WIDTH - 2);
+}
+
 function buildGlassesText(lines: DisplayLine[]): string {
-  return lines
+  const text = lines
     .map((entry) => {
       if (entry.style === "separator") {
         return "─".repeat(44);
@@ -479,6 +371,9 @@ function buildGlassesText(lines: DisplayLine[]): string {
       return `  ${entry.text}`;
     })
     .join("\n");
+  // Convert to fullwidth so the proportional G2 font renders all display
+  // characters at a uniform width. This keeps manually-padded columns aligned.
+  return toFullwidth(text);
 }
 
 function getMaxIndex(state: AppState): number {
@@ -491,12 +386,13 @@ function getMaxIndex(state: AppState): number {
     }
     case "chats":
       return Math.max(0, state.chats.length);
-    case "messages":
-      return Math.max(0, state.messages.length - 1);
-    case "quickReply":
-      return Math.max(0, QUICK_REPLIES.length - 1);
-    case "voiceReply":
-      return 0;
+        case "messages":
+          return Math.max(0, state.messages.length - 1);
+        case "quickReply":
+          return Math.max(0, QUICK_REPLIES.length - 1);
+        case "voiceReply":
+        case "messageDetail":
+          return 0;
   }
 }
 
@@ -636,7 +532,6 @@ function buildChatsDisplay(
 function buildMessagesDisplay(
   state: AppState,
   _highlightedIdx: number,
-  flashPhase: boolean,
 ): DisplayLine[] {
   const lines: DisplayLine[] = [];
 
@@ -662,124 +557,100 @@ function buildMessagesDisplay(
   // Calculate scroll window
   const totalMessages = state.messages.length;
   const maxScroll = Math.max(0, totalMessages - 1);
-  const scrollOffset = Math.min(state.messageScrollOffset, maxScroll);
+  const selectedIdx = Math.min(state.messageScrollOffset, maxScroll);
 
-  // Track line count: header (1) + separator (1) + action bar (1) = 3 fixed
-  // We need room for 1 more line for the "more above" indicator if needed
-  let usedLines = 3; // separator + action bar + buffer
-  const MAX_MESSAGE_LINES = DISPLAY_LINES - usedLines;
+  // Visible window: keep selected message in view
+  const maxItems = DISPLAY_LINES - 3; // header, separator, action bar
+  const maxStart = Math.max(0, totalMessages - maxItems);
+  const start = Math.max(0, Math.min(maxStart, selectedIdx - 1));
+  const visibleMessages = state.messages.slice(start, start + maxItems);
+  const end = start + visibleMessages.length;
 
-  // Show indicator if there are more messages above
-  const hasMoreAbove = scrollOffset > 0;
-  if (hasMoreAbove) {
+  // Indicator if more messages above
+  if (start > 0) {
     lines.push(line("          ▲", "meta"));
-    usedLines++;
   }
 
-  // Get messages to display, respecting line limit
-  const visibleMessages: BeeperMessage[] = [];
-  const moreBelowIndices: { above: number; below: number } = {
-    above: 0,
-    below: 0,
-  };
-  let currentLineCount = 0;
-
-  // Start from scroll position and go forward
-  for (
-    let i = scrollOffset;
-    i < totalMessages && currentLineCount < MAX_MESSAGE_LINES;
-    i++
-  ) {
-    const msg = state.messages[i];
-    const time = formatTime(msg.timestamp);
-    const sender = msg.isSender ? ">" : truncateName(msg.senderName || "?", 8);
-    const prefix = `[${time}] ${sender}: `;
-
-    // Strip unsupported characters and wrap message content
-    const content = stripUnsupportedChars(formatMessageText(msg));
-    const wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
-    const msgLineCount = wrappedLines.length;
-
-    // Check if this message fits
-    if (currentLineCount + msgLineCount <= MAX_MESSAGE_LINES) {
-      visibleMessages.push(msg);
-      currentLineCount += msgLineCount;
-    } else {
-      // Calculate how many messages are below
-      moreBelowIndices.below = totalMessages - i;
-      break;
-    }
-  }
-
-  // Render visible messages
+  // Render message list with cursor on selected message
   if (totalMessages === 0) {
     lines.push(line("No messages yet - send one!", "normal"));
-  } else if (visibleMessages.length === 0) {
-    // The message at scrollOffset is too long to fit fully;
-    // render it truncated so the user sees something.
-    const msg = state.messages[scrollOffset];
-    const time = formatTime(msg.timestamp);
-    const sender = msg.isSender
-      ? ">"
-      : truncateName(msg.senderName || "?", 8);
-    const prefix = `[${time}] ${sender}: `;
-    const content = stripUnsupportedChars(formatMessageText(msg));
-    let wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
-    wrappedLines = wrappedLines.filter((l) => l.length > 0);
-    const capped = wrappedLines.slice(0, Math.max(1, MAX_MESSAGE_LINES));
-
-    if (capped.length > 0) {
-      lines.push(line(`${prefix}${capped[0]}`, "normal"));
-      for (let i = 1; i < capped.length; i++) {
-        lines.push(line(capped[i], "normal"));
-      }
-    }
   } else {
-    visibleMessages.forEach((msg) => {
+    visibleMessages.forEach((msg, idx) => {
+      const globalIdx = start + idx;
+      const isSelected = globalIdx === selectedIdx;
       const time = formatTime(msg.timestamp);
       const sender = msg.isSender
         ? ">"
         : truncateName(msg.senderName || "?", 8);
       const prefix = `[${time}] ${sender}: `;
-
-      // Strip unsupported characters and wrap message content
-      const content = stripUnsupportedChars(formatMessageText(msg));
-      let wrappedLines = wordWrap(content, DISPLAY_WIDTH - prefix.length);
-      // Filter out any empty lines
-      wrappedLines = wrappedLines.filter((line) => line.length > 0);
-
-      // Skip if no content
-      if (wrappedLines.length === 0) return;
-
-      // First line with prefix
-      lines.push(line(`${prefix}${wrappedLines[0]}`, "normal"));
-
-      // Continuation lines (at the beginning of the view)
-      for (let i = 1; i < wrappedLines.length; i++) {
-        if (wrappedLines[i]) {
-          lines.push(line(wrappedLines[i], "normal"));
-        }
-      }
+      const preview = truncate(
+        getMessagePreview(msg),
+        DISPLAY_WIDTH - prefix.length - 2,
+      ); // -2 for cursor + space
+      const lineText = `${isSelected ? ICONS.SELECTED : " "} ${prefix}${preview}`;
+      lines.push(line(lineText, isSelected ? "inverted" : "normal"));
     });
   }
 
-  // Show indicator if there are more messages below
-  const lastShownIndex = scrollOffset + visibleMessages.length - 1;
-  const hasMoreBelow = lastShownIndex < totalMessages - 1;
-  if (hasMoreBelow) {
+  // Indicator if more messages below
+  if (end < totalMessages) {
     lines.push(line("          ▼", "meta"));
   }
 
   lines.push(sep());
 
-  // Reply action (blinking)
-  const hasIncoming = visibleMessages.some((m) => !m.isSender);
-  if (hasIncoming) {
-    const actionBar = buildActionBar(["Reply"], 0, "Reply", flashPhase);
-    lines.push(line(actionBar, "meta"));
-  } else {
-    lines.push(line(buildStaticActionBar(["Back"], 0), "meta"));
+  // Action bar with position info
+  const posText = totalMessages > 0 ? `${selectedIdx + 1}/${totalMessages}` : "";
+  lines.push(
+    line(
+      buildStaticActionBar(["Back"], -1) + (posText ? "  " + posText : ""),
+      "meta",
+    ),
+  );
+
+  return lines;
+}
+
+function buildMessageDetailDisplay(state: AppState): DisplayLine[] {
+  const lines: DisplayLine[] = [];
+  const msg = state.messages[state.selectedMessageIndex];
+
+  if (!msg) {
+    lines.push(line(buildHeaderLine("Message", ""), "inverted"));
+    lines.push(line("Message unavailable", "normal"));
+    lines.push(line("", "normal"));
+    lines.push(line("", "normal"));
+    lines.push(line("", "normal"));
+    lines.push(line("", "normal"));
+    lines.push(sep());
+    lines.push(line("Click: Reply  Double: Back", "meta"));
+    return lines;
   }
+
+  const sender = truncateName(msg.senderName || msg.senderID || "Unknown", 20);
+  const time = formatTime(msg.timestamp);
+  const wrappedBody = getMessageDetailWrappedBody(msg);
+  const availableBodyLines = Math.max(0, DISPLAY_LINES - 4);
+  const maxScroll = Math.max(0, wrappedBody.length - availableBodyLines);
+  const scrollOffset = Math.min(state.messageDetailScrollOffset, maxScroll);
+  const visibleBody = wrappedBody.slice(
+    scrollOffset,
+    scrollOffset + availableBodyLines,
+  );
+
+  lines.push(line(buildHeaderLine(sender, time), "inverted"));
+  lines.push(...visibleBody.map((entry) => line(entry, "normal")));
+  while (lines.length < DISPLAY_LINES - 3) {
+    lines.push(line("", "normal"));
+  }
+  const indicator =
+    maxScroll > 0
+      ? `${scrollOffset > 0 ? "▲ " : ""}${maxScroll > scrollOffset ? "▼ " : ""}${Math.min(scrollOffset + availableBodyLines, wrappedBody.length)}/${wrappedBody.length}`
+      : `${wrappedBody.length}/${wrappedBody.length}`;
+  lines.push(line(indicator, "meta"));
+
+  lines.push(sep());
+  lines.push(line("Click: Reply  Double: Back", "meta"));
 
   return lines;
 }
@@ -914,6 +785,14 @@ function buildVoiceCardContent(state: AppState): string {
   const body = transcript || status;
 
   return truncate(`Voice reply\n${sender}\n\n${body}`, 950);
+}
+
+function buildMessageDetailContent(msg: BeeperMessage): string {
+  const sender = stripUnsupportedChars(msg.senderName || msg.senderID || "Unknown");
+  const time = stripUnsupportedChars(formatTime(msg.timestamp));
+  const fullText = stripUnsupportedChars(formatMessageText(msg));
+
+  return `${sender}  ${time}\n\n${fullText}\n\nClick: Reply\nDouble click: Back`;
 }
 
 function areMessagesEqual(a: BeeperMessage[], b: BeeperMessage[]): boolean {
@@ -1138,6 +1017,7 @@ export function GlassesUI({
     highlightedIndex: 0,
     isLoading: true,
     messageScrollOffset: 0,
+    messageDetailScrollOffset: 0,
     demoMode: false,
     voiceStatus: null,
     voiceTranscript: "",
@@ -1596,8 +1476,99 @@ export function GlassesUI({
     );
   }, [dismissVoiceReply, state, stopNativeOverlayEvents, submitVoiceReply]);
 
-  // Flash phase for blinking action indicators
-  const flashPhase = useFlashPhase(true);
+  const showMessageDetailOverlay = useCallback(async (msg: BeeperMessage) => {
+    const bridge = await getBridge();
+    if (!bridge) return;
+
+    const fullContent = truncate(
+      buildMessageDetailContent(msg),
+      MESSAGE_DETAIL_UPGRADE_MAX_CHARS,
+    );
+    const rebuildContent = truncate(
+      fullContent,
+      MESSAGE_DETAIL_REBUILD_MAX_CHARS,
+    );
+
+    const textContainer = new TextContainerProperty({
+      containerID: MESSAGE_DETAIL_CONTAINER.TEXT_ID,
+      containerName: MESSAGE_DETAIL_CONTAINER.TEXT_NAME,
+      xPosition: 8,
+      yPosition: 8,
+      width: 560,
+      height: 272,
+      content: rebuildContent,
+      borderWidth: 1,
+      borderColor: 15,
+      borderRadius: 8,
+      paddingLength: 10,
+      isEventCapture: 1,
+    });
+
+    const rebuildContainer = new RebuildPageContainer({
+      containerTotalNum: 1,
+      textObject: [textContainer],
+      listObject: [],
+      imageObject: [],
+    });
+
+    const rebuildOk = await bridge.rebuildPageContainer(rebuildContainer);
+    if (!rebuildOk) {
+      console.warn("[GlassesUI] Failed to build message detail overlay");
+      return;
+    }
+
+    if (fullContent !== rebuildContent) {
+      const upgradeOk = await bridge.textContainerUpgrade(
+        new TextContainerUpgrade({
+          containerID: MESSAGE_DETAIL_CONTAINER.TEXT_ID,
+          containerName: MESSAGE_DETAIL_CONTAINER.TEXT_NAME,
+          contentOffset: 0,
+          contentLength: fullContent.length,
+          content: fullContent,
+        }),
+      );
+      if (!upgradeOk) {
+        console.warn("[GlassesUI] Failed to upgrade message detail text");
+      }
+    }
+
+    stopNativeOverlayEvents();
+    nativeOverlayScreenRef.current = "messageDetail";
+    const overlayOpenedAt = Date.now();
+    nativeOverlayEventUnsubscribeRef.current = bridge.onEvenHubEvent(
+      async (event: EvenHubEvent) => {
+        if (nativeOverlayScreenRef.current !== "messageDetail") {
+          return;
+        }
+
+        if (Date.now() - overlayOpenedAt < NATIVE_OVERLAY_EVENT_DEBOUNCE_MS) {
+          return;
+        }
+
+        const action = mapGlassEvent(event);
+        if (action?.type === "GO_BACK") {
+          await hideNativeOverlay();
+          setState((s) => ({ ...s, currentScreen: "messages" }));
+          return;
+        }
+
+        if (action?.type === "SELECT_HIGHLIGHTED") {
+          await hideNativeOverlay();
+          setState((s) => ({
+            ...s,
+            currentScreen: "quickReply",
+            highlightedIndex: 0,
+            selectedMessageIndex: s.messageScrollOffset,
+          }));
+          navRef.current = {
+            ...navRef.current,
+            highlightedIndex: 0,
+            screen: "quickReply",
+          };
+        }
+      },
+    );
+  }, [hideNativeOverlay, stopNativeOverlayEvents]);
 
   // Demo mode: click timestamps tracked in onGlassAction
   const clickTimestamps = useRef<number[]>([]);
@@ -1889,6 +1860,14 @@ export function GlassesUI({
       return;
     }
 
+    if (state.currentScreen === "messageDetail") {
+      const selectedMsg = state.messages[state.selectedMessageIndex];
+      if (selectedMsg) {
+        void showMessageDetailOverlay(selectedMsg);
+      }
+      return;
+    }
+
     if (!nativeOverlayScreenRef.current) {
       return;
     }
@@ -1896,6 +1875,7 @@ export function GlassesUI({
     void hideNativeOverlay();
   }, [
     hideNativeOverlay,
+    showMessageDetailOverlay,
     showQuickReplyOverlay,
     showVoiceReplyOverlay,
     state.currentScreen,
@@ -1975,13 +1955,22 @@ export function GlassesUI({
         }
 
         case "messages": {
+          const selectedMsg = s.messages[s.messageScrollOffset];
+          if (selectedMsg) {
+            updates.currentScreen = "messageDetail";
+            updates.selectedMessageIndex = s.messageScrollOffset;
+            updates.messageDetailScrollOffset = 0;
+            if (ENABLE_CUSTOM_GLASSES_RENDERER) {
+              void showMessageDetailOverlay(selectedMsg);
+            }
+          }
+          break;
+        }
+
+        case "messageDetail": {
           updates.currentScreen = "quickReply";
           updates.highlightedIndex = 0;
-          navRef.current = {
-            ...navRef.current,
-            highlightedIndex: 0,
-            screen: "quickReply",
-          };
+          updates.messageDetailScrollOffset = 0;
           break;
         }
 
@@ -2018,7 +2007,7 @@ export function GlassesUI({
 
       return updates;
     },
-    [beeper, startVoiceReply, submitVoiceReply],
+    [beeper, startVoiceReply, submitVoiceReply, showMessageDetailOverlay],
   );
 
   // Handle back
@@ -2041,6 +2030,10 @@ export function GlassesUI({
           updates.currentScreen = "chats";
           updates.selectedChat = null;
           updates.messageScrollOffset = 0; // Reset scroll for next visit
+          break;
+        case "messageDetail":
+          updates.currentScreen = "messages";
+          updates.messageDetailScrollOffset = 0;
           break;
         case "quickReply":
           updates.currentScreen = "messages";
@@ -2148,7 +2141,7 @@ export function GlassesUI({
 
     if (state.demoMode) {
       const demoMessages = getDemoMessages();
-      const initialScroll = getMaxScrollForMessages(demoMessages);
+      const initialScroll = Math.max(0, demoMessages.length - 1);
 
       setState((s) => {
         const nextScroll = options?.preserveScroll
@@ -2181,7 +2174,7 @@ export function GlassesUI({
         messages = result.messages.reverse();
       }
       const finalMessages = messages.length > 0 ? messages : getDemoMessages();
-      const initialScroll = getMaxScrollForMessages(finalMessages);
+      const initialScroll = Math.max(0, finalMessages.length - 1);
 
       setState((s) => {
         const nextScroll = options?.preserveScroll
@@ -2206,7 +2199,7 @@ export function GlassesUI({
       });
     } catch {
       const demoMessages = getDemoMessages();
-      const initialScroll = getMaxScrollForMessages(demoMessages);
+      const initialScroll = Math.max(0, demoMessages.length - 1);
 
       setState((s) => {
         const nextScroll = options?.preserveScroll
@@ -2273,11 +2266,9 @@ export function GlassesUI({
         case "chats":
           return buildChatsDisplay(snapshot, nav.highlightedIndex);
         case "messages":
-          return buildMessagesDisplay(
-            snapshot,
-            nav.highlightedIndex,
-            flashPhase,
-          );
+          return buildMessagesDisplay(snapshot, nav.highlightedIndex);
+        case "messageDetail":
+          return buildMessageDetailDisplay(snapshot);
         case "quickReply":
           return buildQuickReplyDisplay(snapshot, nav.highlightedIndex);
         case "voiceReply":
@@ -2286,7 +2277,7 @@ export function GlassesUI({
           return [line("Even Messages", "inverted")];
       }
     },
-    [flashPhase],
+    [],
   );
 
   // Handle glass actions
@@ -2318,21 +2309,47 @@ export function GlassesUI({
 
       switch (action.type) {
         case "HIGHLIGHT_MOVE": {
-          // Handle scrolling in messages screen
+          if (snapshot.currentScreen === "messageDetail") {
+            const msg = snapshot.messages[snapshot.selectedMessageIndex];
+            if (!msg) return nav;
+
+            const wrappedBody = getMessageDetailWrappedBody(msg);
+            const visibleLines = Math.max(0, DISPLAY_LINES - 4);
+            const maxScroll = Math.max(0, wrappedBody.length - visibleLines);
+            const currentScroll = Math.min(
+              snapshot.messageDetailScrollOffset,
+              maxScroll,
+            );
+
+            if (action.direction === "down" && currentScroll >= maxScroll) {
+              return nav;
+            }
+            if (action.direction === "up" && currentScroll <= 0) {
+              return nav;
+            }
+
+            const nextScroll =
+              currentScroll + (action.direction === "down" ? 1 : -1);
+            setState((s) => ({
+              ...s,
+              messageDetailScrollOffset: nextScroll,
+            }));
+            return nav;
+          }
+
+          // Messages screen uses messageScrollOffset for cursor position
           if (snapshot.currentScreen === "messages") {
             const messages = snapshot.messages;
             if (messages.length === 0) return nav;
 
             const currentScroll = snapshot.messageScrollOffset;
-            // Calculate max scroll based on actual display capacity
-            const maxScroll = getMaxScrollForMessages(messages);
+            const maxScroll = Math.max(0, messages.length - 1);
 
-            // Block scrolling beyond boundaries
             if (action.direction === "down" && currentScroll >= maxScroll) {
-              return nav; // Already at bottom, do nothing
+              return nav;
             }
             if (action.direction === "up" && currentScroll <= 0) {
-              return nav; // Already at top, do nothing
+              return nav;
             }
 
             const newScroll =
@@ -2341,7 +2358,6 @@ export function GlassesUI({
             return nav;
           }
 
-          // Normal highlight navigation for other screens
           const maxIdx = getMaxIndex(snapshot);
           const newIdx = Math.max(
             0,
@@ -2393,6 +2409,12 @@ export function GlassesUI({
         }
 
         case "GO_BACK": {
+          // Even Hub submission requirement: root-page double-tap must show
+          // the native exit dialogue. See page-lifecycle.md.
+          if (snapshot.currentScreen === "accounts") {
+            void getBridge().then((b) => b?.shutDownPageContainer(1));
+            return nav;
+          }
           setState((s) => {
             const updates = handleBackRef.current(s);
             return { ...s, ...updates };
@@ -2512,7 +2534,7 @@ export function GlassesUI({
           containerID: BASE_PAGE_CONTAINER.TEXT_ID,
           containerName: BASE_PAGE_CONTAINER.TEXT_NAME,
           contentOffset: 0,
-          contentLength: 2000,
+          contentLength: text.length,
           content: text,
         }),
       );
@@ -2531,7 +2553,10 @@ export function GlassesUI({
       );
       const platformIds = visible.map((chat) => chat.accountID);
       const iconSignature = platformIds.join("|");
-      const iconRows = MAX_VISIBLE_ITEMS - 2;
+      // Image containers are limited to 144px height on G2 hardware.
+      const maxIconRows = Math.floor(144 / CHAT_ROW_HEIGHT);
+      const iconRows = Math.min(MAX_VISIBLE_ITEMS - 2, maxIconRows);
+      const iconHeight = iconRows * CHAT_ROW_HEIGHT;
       const shouldRenderIcons =
         glassesChatIconsEnabledRef.current && visible.length > 0;
       const targetLayout: "text" | "chats" = shouldRenderIcons
@@ -2584,7 +2609,7 @@ export function GlassesUI({
                 xPosition: CHAT_ICON_X,
                 yPosition: CHAT_ICON_START_Y,
                 width: CHAT_ICON_WIDTH,
-                height: iconRows * CHAT_ROW_HEIGHT,
+                height: iconHeight,
               }),
             ],
             listObject: [],
@@ -2599,7 +2624,7 @@ export function GlassesUI({
             containerID: BASE_PAGE_CONTAINER.TEXT_ID,
             containerName: BASE_PAGE_CONTAINER.TEXT_NAME,
             contentOffset: 0,
-            contentLength: 2000,
+            contentLength: text.length,
             content: text,
           }),
         );

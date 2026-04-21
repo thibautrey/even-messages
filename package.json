@@ -4,11 +4,13 @@
   "private": true,
   "description": "Even Glasses messaging app using Beeper API",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "qr": "evenhub qr --http --port 5173",
+    "pack": "npm run build && evenhub pack app.json dist -o even-messages.ehpk"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "0.0.10",
@@ -29,6 +31,7 @@
     "eslint": "^8.45.0",
     "eslint-plugin-react-hooks": "^4.6.0",
     "typescript": "^5.0.0",
-    "vite": "^4.4.0"
+    "vite": "^4.4.0",
+    "@evenrealities/evenhub-cli": "^1.0.0"
   }
 }
