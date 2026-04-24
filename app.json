@@ -1,15 +1,21 @@
 {
-  "package_id": "solutions.pleiades.evenmessages",
   "edition": "202601",
-  "name": "Even Messages",
-  "version": "0.1.1",
+  "entrypoint": "index.html",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.9",
-  "entrypoint": "index.html",
-  "permissions": {
-    "network": ["*"]
-  },
+  "name": "Even Messages",
+  "package_id": "solutions.pleiades.evenmessages",
+  "permissions": [
+    {
+      "desc": "This app needs to access the network in order to displays the messages from your computer and load links and images",
+      "name": "network",
+      "whitelist": [
+        "*"
+      ]
+    }
+  ],
   "supported_languages": [
     "en"
-  ]
+  ],
+  "version": "0.1.6"
 }

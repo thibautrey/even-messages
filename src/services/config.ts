@@ -211,11 +211,11 @@ export async function updateSpeechApiConfig(
 
 export async function getSpeechApiConfig(): Promise<SpeechApiConfig | null> {
   const config = await getConfig()
-  if (config.speechApiBaseUrl && config.speechApiToken && config.speechApiModel) {
+  if (config.speechApiBaseUrl && config.speechApiToken) {
     return {
       baseUrl: config.speechApiBaseUrl,
       token: config.speechApiToken,
-      model: config.speechApiModel,
+      model: config.speechApiModel || '',
     }
   }
   return null
@@ -223,11 +223,11 @@ export async function getSpeechApiConfig(): Promise<SpeechApiConfig | null> {
 
 export function getSpeechApiConfigSync(): SpeechApiConfig | null {
   const config = getConfigSync()
-  if (config.speechApiBaseUrl && config.speechApiToken && config.speechApiModel) {
+  if (config.speechApiBaseUrl && config.speechApiToken) {
     return {
       baseUrl: config.speechApiBaseUrl,
       token: config.speechApiToken,
-      model: config.speechApiModel,
+      model: config.speechApiModel || '',
     }
   }
   return null

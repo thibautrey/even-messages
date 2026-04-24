@@ -899,8 +899,13 @@ function SpeechSettingsPane({
     onSave(baseUrl.trim(), token.trim(), modelId);
   };
 
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSave(baseUrl.trim(), token.trim(), selectedModel.trim());
+  };
+
   return (
-    <div className={styles.modalBody}>
+    <form onSubmit={handleSubmit} className={styles.modalBody}>
       <div className={styles.formGroup}>
         <label htmlFor="speechBaseUrl">Speech API Base URL</label>
         <input
@@ -941,9 +946,12 @@ function SpeechSettingsPane({
       </div>
 
       <div className={styles.modalActions}>
+        <button type="submit" className={styles.saveButton}>
+          Save Settings
+        </button>
         <button
           type="button"
-          className={styles.saveButton}
+          className={styles.cancelButton}
           onClick={handleLoadModels}
           disabled={isLoadingModels}
         >
@@ -987,7 +995,7 @@ function SpeechSettingsPane({
           </div>
         )}
       </div>
-    </div>
+    </form>
   );
 }
 

@@ -121,6 +121,7 @@ const QUICK_REPLIES = [
 
 const QUICK_REPLY_CANCEL = "Cancel";
 const VOICE_NOT_CONFIGURED_STATUS = "Speech not configured in Settings";
+const MESSAGE_LOADING_HINT_DELAY_MS = 3000;
 const VOICE_NOT_SUPPORTED_STATUS = "Live mic transcription unavailable";
 const MESSAGE_DETAIL_REBUILD_MAX_CHARS = 950;
 const MESSAGE_DETAIL_UPGRADE_MAX_CHARS = 2000;
@@ -223,6 +224,8 @@ interface AppState {
   selectedMessageIndex: number;
   highlightedIndex: number;
   isLoading: boolean;
+  messageLoadingTimedOut: boolean;
+  messageLoadFailed: boolean;
   messageScrollOffset: number; // For scrolling through messages
   messageDetailScrollOffset: number;
   demoMode: boolean; // Easter egg: force demo mode with fake data
@@ -545,10 +548,27 @@ function buildMessagesDisplay(
   // Show loading indicator if loading
   if (state.isLoading) {
     lines.push(line("Loading messages...", "normal"));
+    if (state.messageLoadingTimedOut) {
+      lines.push(line("", "normal"));
+      lines.push(line("Open the app on", "normal"));
+      lines.push(line("your phone to", "normal"));
+      lines.push(line("configure it.", "normal"));
+    } else {
+      lines.push(line("", "normal"));
+      lines.push(line("", "normal"));
+      lines.push(line("", "normal"));
+      lines.push(line("", "normal"));
+    }
+    lines.push(sep());
+    lines.push(line(buildStaticActionBar(["Back"], 0), "meta"));
+    return lines;
+  }
+
+  if (state.messageLoadFailed) {
     lines.push(line("", "normal"));
-    lines.push(line("", "normal"));
-    lines.push(line("", "normal"));
-    lines.push(line("", "normal"));
+    lines.push(line("Open the app on", "normal"));
+    lines.push(line("your phone to", "normal"));
+    lines.push(line("configure it.", "normal"));
     lines.push(sep());
     lines.push(line(buildStaticActionBar(["Back"], 0), "meta"));
     return lines;
@@ -1016,6 +1036,8 @@ export function GlassesUI({
     selectedMessageIndex: 0,
     highlightedIndex: 0,
     isLoading: true,
+    messageLoadingTimedOut: false,
+    messageLoadFailed: false,
     messageScrollOffset: 0,
     messageDetailScrollOffset: 0,
     demoMode: false,
@@ -1572,6 +1594,36 @@ export function GlassesUI({
 
   // Demo mode: click timestamps tracked in onGlassAction
   const clickTimestamps = useRef<number[]>([]);
+
+  useEffect(() => {
+    if (state.currentScreen !== "messages" || !state.isLoading) {
+      if (state.messageLoadingTimedOut) {
+        setState((s) =>
+          s.messageLoadingTimedOut ? { ...s, messageLoadingTimedOut: false } : s,
+        );
+      }
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setState((s) => {
+        if (
+          s.currentScreen !== "messages" ||
+          !s.isLoading ||
+          s.messageLoadingTimedOut
+        ) {
+          return s;
+        }
+
+        return {
+          ...s,
+          messageLoadingTimedOut: true,
+        };
+      });
+    }, MESSAGE_LOADING_HINT_DELAY_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [state.currentScreen, state.isLoading, state.selectedChat]);
 
   // Load saved state and initial data
   useEffect(() => {
@@ -2136,6 +2188,8 @@ export function GlassesUI({
         ...s,
         messages: [],
         isLoading: true,
+        messageLoadingTimedOut: false,
+        messageLoadFailed: false,
       }));
     }
 
@@ -2160,6 +2214,8 @@ export function GlassesUI({
           ...s,
           messages: demoMessages,
           isLoading: false,
+          messageLoadingTimedOut: false,
+          messageLoadFailed: false,
           highlightedIndex: options?.silent ? s.highlightedIndex : 0,
           messageScrollOffset: nextScroll,
         };
@@ -2168,12 +2224,13 @@ export function GlassesUI({
     }
 
     try {
-      let messages: BeeperMessage[] = [];
-      if (beeper) {
-        const result = await beeper.listMessages(chatId);
-        messages = result.messages.reverse();
+      if (!beeper) {
+        throw new Error("Beeper is not configured");
       }
-      const finalMessages = messages.length > 0 ? messages : getDemoMessages();
+
+      const result = await beeper.listMessages(chatId);
+      const messages = result.messages.reverse();
+      const finalMessages = messages;
       const initialScroll = Math.max(0, finalMessages.length - 1);
 
       setState((s) => {
@@ -2193,33 +2250,35 @@ export function GlassesUI({
           ...s,
           messages: finalMessages,
           isLoading: options?.silent ? s.isLoading : false,
+          messageLoadingTimedOut: options?.silent
+            ? s.messageLoadingTimedOut
+            : false,
+          messageLoadFailed: false,
           highlightedIndex: options?.silent ? s.highlightedIndex : 0,
           messageScrollOffset: nextScroll,
         };
       });
     } catch {
-      const demoMessages = getDemoMessages();
-      const initialScroll = Math.max(0, demoMessages.length - 1);
-
       setState((s) => {
-        const nextScroll = options?.preserveScroll
-          ? Math.min(s.messageScrollOffset, initialScroll)
-          : initialScroll;
-        const sameMessages = areMessagesEqual(s.messages, demoMessages);
+        const sameMessages = s.messages.length === 0;
         const sameLoading = options?.silent ? true : s.isLoading === false;
         const sameHighlight = options?.silent ? true : s.highlightedIndex === 0;
-        const sameScroll = s.messageScrollOffset === nextScroll;
+        const sameFailure = s.messageLoadFailed;
 
-        if (sameMessages && sameLoading && sameHighlight && sameScroll) {
+        if (sameMessages && sameLoading && sameHighlight && sameFailure) {
           return s;
         }
 
         return {
           ...s,
-          messages: demoMessages,
+          messages: [],
           isLoading: options?.silent ? s.isLoading : false,
+          messageLoadingTimedOut: options?.silent
+            ? s.messageLoadingTimedOut
+            : false,
+          messageLoadFailed: true,
           highlightedIndex: options?.silent ? s.highlightedIndex : 0,
-          messageScrollOffset: nextScroll,
+          messageScrollOffset: 0,
         };
       });
     }
