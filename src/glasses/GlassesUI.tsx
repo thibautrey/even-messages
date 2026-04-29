@@ -41,6 +41,7 @@ import {
 import { getServiceIcon } from "./platformIcons";
 import {
   getChatIconStripPng,
+  pngDataUrlToBytes,
   CHAT_ICON_X,
   CHAT_ICON_START_Y,
   CHAT_ICON_WIDTH,
@@ -62,9 +63,16 @@ const STICKY_FOOTER_LINES = 2; // separator + bottom action/menu line
 const SEPARATOR_LINE = "----------------------------------------"; // 40 dashes
 const GLASSES_DISPLAY_WIDTH = 576;
 const GLASSES_DISPLAY_HEIGHT = 288;
+const MESSAGE_MEDIA_IMAGE_WIDTH = 200;
+const MESSAGE_MEDIA_IMAGE_HEIGHT = 100;
+const MESSAGE_MEDIA_IMAGE_X = Math.floor(
+  (GLASSES_DISPLAY_WIDTH - MESSAGE_MEDIA_IMAGE_WIDTH) / 2,
+);
+const MESSAGE_MEDIA_IMAGE_Y = 0;
 const CHAT_TEXT_PREFIX = "    ";
 const ENABLE_CUSTOM_GLASSES_RENDERER = false;
 const STARTUP_DELAY_MS = 1200; // Brief delay so OS registers the startup render
+const DEFAULT_BEEPER_BASE_URL = "http://localhost:23373";
 
 const BASE_PAGE_CONTAINER = {
   OVERLAY_ID: 1,
@@ -122,10 +130,14 @@ const QUICK_REPLIES = [
 const QUICK_REPLY_CANCEL = "Cancel";
 const VOICE_NOT_CONFIGURED_STATUS = "Speech not configured in Settings";
 const MESSAGE_LOADING_HINT_DELAY_MS = 3000;
-const VOICE_NOT_SUPPORTED_STATUS = "Live mic transcription unavailable";
+const VOICE_MIC_UNAVAILABLE_STATUS = "Mic unavailable";
+const VOICE_TRANSCRIPTION_FAILED_STATUS = "Transcription failed";
 const MESSAGE_DETAIL_REBUILD_MAX_CHARS = 950;
 const MESSAGE_DETAIL_UPGRADE_MAX_CHARS = 2000;
 const NATIVE_OVERLAY_EVENT_DEBOUNCE_MS = 250;
+const PCM_SAMPLE_RATE = 16000;
+const PCM_BITS_PER_SAMPLE = 16;
+const PCM_CHANNELS = 1;
 
 const NATIVE_REPLY_CONTAINER = {
   QUICK_TITLE_ID: 201,
@@ -141,9 +153,27 @@ const NATIVE_REPLY_CONTAINER = {
 const MESSAGE_DETAIL_CONTAINER = {
   TEXT_ID: 221,
   TEXT_NAME: "message-detail-text",
+  IMAGE_ID: 223,
+  IMAGE_NAME: "message-media",
   ACTION_LIST_ID: 222,
   ACTION_LIST_NAME: "message-detail-actions",
 } as const;
+
+type MessageDetailImageTile = {
+  messageId: string;
+  url: string;
+  bytes: Uint8Array;
+};
+
+type MessageDetailImageStatus = "none" | "loading" | "loaded" | "failed";
+
+type MessageAttachmentRecord = NonNullable<
+  BeeperMessage["attachments"]
+>[number] &
+  Record<string, unknown>;
+
+const messageMediaImageCache = new Map<string, Uint8Array>();
+const failedMessageMediaImageUrls = new Set<string>();
 
 // ═══════════════════════════════════════════════════════════════
 // PERSISTENCE (Using Even SDK Storage)
@@ -226,31 +256,20 @@ interface AppState {
   isLoading: boolean;
   messageLoadingTimedOut: boolean;
   messageLoadFailed: boolean;
+  setupRequired: boolean;
   messageScrollOffset: number; // For scrolling through messages
   messageDetailScrollOffset: number;
+  messageDetailImageTile: MessageDetailImageTile | null;
+  messageDetailImageStatus: MessageDetailImageStatus;
   demoMode: boolean; // Easter egg: force demo mode with fake data
   voiceStatus: string | null;
   voiceTranscript: string;
   voiceAudioBytes: number;
 }
 
-interface BrowserSpeechRecognitionEvent {
-  results: SpeechRecognitionResultList;
+interface TranscriptionResponse {
+  text?: string;
 }
-
-type BrowserSpeechRecognition = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-
-type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
 // Demo mode trigger: 5 clicks within 1 second
 const DEMO_MODE_CLICKS = 5;
@@ -362,6 +381,146 @@ function getMessageDetailWrappedBody(msg: BeeperMessage): string[] {
   return wrapText(body, DISPLAY_WIDTH - 2);
 }
 
+function normalizeBeeperBaseUrl(baseUrl?: string): string {
+  return (baseUrl || DEFAULT_BEEPER_BASE_URL).replace(/\/v1\/?$/, "").replace(/\/$/, "");
+}
+
+function getAttachmentString(
+  attachment: MessageAttachmentRecord,
+  key: string,
+): string | null {
+  const value = attachment[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function buildBeeperAssetUrl(baseUrl: string, assetUrl: string): string {
+  if (!assetUrl) return "";
+
+  if (assetUrl.startsWith("/")) {
+    return `${normalizeBeeperBaseUrl(baseUrl)}${assetUrl}`;
+  }
+
+  if (assetUrl.startsWith("mxc://") || /^https?:\/\//i.test(assetUrl)) {
+    return `${normalizeBeeperBaseUrl(baseUrl)}/v1/assets/serve?url=${encodeURIComponent(assetUrl)}`;
+  }
+
+  return assetUrl;
+}
+
+function isImageAttachment(
+  msg: BeeperMessage,
+  attachment: MessageAttachmentRecord,
+): boolean {
+  const messageType = String(msg.type || "").toUpperCase();
+  const attachmentType = getAttachmentString(attachment, "type")?.toUpperCase();
+  const mimeType = getAttachmentString(attachment, "mimeType")?.toLowerCase();
+  const filename = getAttachmentString(attachment, "filename")?.toLowerCase();
+
+  return (
+    messageType === "IMAGE" ||
+    messageType === "STICKER" ||
+    attachmentType === "IMAGE" ||
+    attachmentType === "STICKER" ||
+    !!mimeType?.startsWith("image/") ||
+    !!filename?.match(/\.(apng|avif|gif|jpe?g|png|webp)$/)
+  );
+}
+
+function getAttachmentImageUrl(
+  attachment: MessageAttachmentRecord,
+  baseUrl: string,
+): string | null {
+  const rawUrl =
+    getAttachmentString(attachment, "srcURL") ||
+    getAttachmentString(attachment, "srcUrl") ||
+    getAttachmentString(attachment, "url") ||
+    getAttachmentString(attachment, "thumbnailUrl") ||
+    getAttachmentString(attachment, "thumbnailURL") ||
+    getAttachmentString(attachment, "thumbnail_srcURL");
+
+  return rawUrl ? buildBeeperAssetUrl(baseUrl, rawUrl) : null;
+}
+
+function getMessageImageUrl(
+  msg: BeeperMessage,
+  baseUrl?: string,
+): string | null {
+  const attachments = msg.attachments as MessageAttachmentRecord[] | undefined;
+  if (!attachments?.length) {
+    return null;
+  }
+
+  const normalizedBaseUrl = normalizeBeeperBaseUrl(baseUrl);
+  for (const attachment of attachments) {
+    if (!isImageAttachment(msg, attachment)) {
+      continue;
+    }
+
+    const imageUrl = getAttachmentImageUrl(attachment, normalizedBaseUrl);
+    if (imageUrl) {
+      return imageUrl;
+    }
+  }
+
+  return null;
+}
+
+async function loadImageElement(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error(`Failed to load image: ${url}`));
+    img.src = url;
+  });
+}
+
+async function loadMessageMediaImageBytes(url: string): Promise<Uint8Array> {
+  if (failedMessageMediaImageUrls.has(url)) {
+    throw new Error(`Skipping previously failed image: ${url}`);
+  }
+
+  const cached = messageMediaImageCache.get(url);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const img = await loadImageElement(url);
+    if (!img.naturalWidth || !img.naturalHeight) {
+      throw new Error("Image decoded without dimensions");
+    }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Could not get canvas context");
+    }
+
+    canvas.width = MESSAGE_MEDIA_IMAGE_WIDTH;
+    canvas.height = MESSAGE_MEDIA_IMAGE_HEIGHT;
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const scale = Math.min(
+      canvas.width / img.naturalWidth,
+      canvas.height / img.naturalHeight,
+    );
+    const drawWidth = Math.max(1, Math.round(img.naturalWidth * scale));
+    const drawHeight = Math.max(1, Math.round(img.naturalHeight * scale));
+    const drawX = Math.floor((canvas.width - drawWidth) / 2);
+    const drawY = Math.floor((canvas.height - drawHeight) / 2);
+
+    ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
+    const bytes = new Uint8Array(pngDataUrlToBytes(canvas.toDataURL("image/png")));
+    messageMediaImageCache.set(url, bytes);
+    return bytes;
+  } catch (e) {
+    failedMessageMediaImageUrls.add(url);
+    throw e;
+  }
+}
+
 function buildGlassesText(lines: DisplayLine[]): string {
   const text = lines
     .map((entry) => {
@@ -399,19 +558,80 @@ function getMaxIndex(state: AppState): number {
   }
 }
 
-function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
-  if (typeof window === "undefined") return null;
+function normalizeSpeechBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
 
-  const speechWindow = window as Window & {
-    SpeechRecognition?: BrowserSpeechRecognitionCtor;
-    webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
-  };
+function mergeAudioChunks(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Uint8Array(totalLength);
+  let offset = 0;
 
-  return (
-    speechWindow.SpeechRecognition ||
-    speechWindow.webkitSpeechRecognition ||
-    null
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return merged;
+}
+
+function writeAscii(view: DataView, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+function pcmToWavBlob(pcm: Uint8Array): Blob {
+  const headerLength = 44;
+  const wavBuffer = new ArrayBuffer(headerLength + pcm.length);
+  const view = new DataView(wavBuffer);
+  const byteRate = PCM_SAMPLE_RATE * PCM_CHANNELS * (PCM_BITS_PER_SAMPLE / 8);
+  const blockAlign = PCM_CHANNELS * (PCM_BITS_PER_SAMPLE / 8);
+
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + pcm.length, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, PCM_CHANNELS, true);
+  view.setUint32(24, PCM_SAMPLE_RATE, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, PCM_BITS_PER_SAMPLE, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, pcm.length, true);
+  new Uint8Array(wavBuffer, headerLength).set(pcm);
+
+  return new Blob([wavBuffer], { type: "audio/wav" });
+}
+
+async function transcribePcmAudio(
+  speechConfig: SpeechApiConfig,
+  pcm: Uint8Array,
+): Promise<string> {
+  const formData = new FormData();
+  formData.append("model", speechConfig.model);
+  formData.append("file", pcmToWavBlob(pcm), "voice-reply.wav");
+
+  const response = await fetch(
+    `${normalizeSpeechBaseUrl(speechConfig.baseUrl)}/audio/transcriptions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${speechConfig.token}`,
+      },
+      body: formData,
+    },
   );
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(body || `Transcription request failed (${response.status})`);
+  }
+
+  const json = (await response.json()) as TranscriptionResponse;
+  return (json.text || "").trim();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -492,6 +712,10 @@ function buildChatsDisplay(
     lines.push(line("", "normal"));
     lines.push(line("", "normal"));
     lines.push(line("", "normal"));
+  } else if (state.setupRequired) {
+    lines.push(line("Open the app on", "normal"));
+    lines.push(line("your phone to", "normal"));
+    lines.push(line("configure it.", "normal"));
   } else if (state.chats.length === 0) {
     lines.push(line("No chats found", "normal"));
   } else {
@@ -564,7 +788,7 @@ function buildMessagesDisplay(
     return lines;
   }
 
-  if (state.messageLoadFailed) {
+  if (state.messageLoadFailed || state.setupRequired) {
     lines.push(line("", "normal"));
     lines.push(line("Open the app on", "normal"));
     lines.push(line("your phone to", "normal"));
@@ -631,7 +855,10 @@ function buildMessagesDisplay(
   return lines;
 }
 
-function buildMessageDetailDisplay(state: AppState): DisplayLine[] {
+function buildMessageDetailDisplay(
+  state: AppState,
+  imageStatus: MessageDetailImageStatus,
+): DisplayLine[] {
   const lines: DisplayLine[] = [];
   const msg = state.messages[state.selectedMessageIndex];
 
@@ -650,7 +877,10 @@ function buildMessageDetailDisplay(state: AppState): DisplayLine[] {
   const sender = truncateName(msg.senderName || msg.senderID || "Unknown", 20);
   const time = formatTime(msg.timestamp);
   const wrappedBody = getMessageDetailWrappedBody(msg);
-  const availableBodyLines = Math.max(0, DISPLAY_LINES - 4);
+  const hasLoadedImage = imageStatus === "loaded";
+  const availableBodyLines = hasLoadedImage
+    ? 2
+    : Math.max(0, DISPLAY_LINES - 4);
   const maxScroll = Math.max(0, wrappedBody.length - availableBodyLines);
   const scrollOffset = Math.min(state.messageDetailScrollOffset, maxScroll);
   const visibleBody = wrappedBody.slice(
@@ -659,6 +889,11 @@ function buildMessageDetailDisplay(state: AppState): DisplayLine[] {
   );
 
   lines.push(line(buildHeaderLine(sender, time), "inverted"));
+  if (imageStatus === "loading") {
+    lines.push(line("Loading image...", "meta"));
+  } else if (imageStatus === "failed") {
+    lines.push(line("Image unavailable", "meta"));
+  }
   lines.push(...visibleBody.map((entry) => line(entry, "normal")));
   while (lines.length < DISPLAY_LINES - 3) {
     lines.push(line("", "normal"));
@@ -732,7 +967,10 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
   const isVoiceReady = state.voiceTranscript.trim().length > 0;
   const isSpeechUnavailable =
     status === VOICE_NOT_CONFIGURED_STATUS ||
-    status === VOICE_NOT_SUPPORTED_STATUS;
+    status === VOICE_MIC_UNAVAILABLE_STATUS ||
+    status === VOICE_TRANSCRIPTION_FAILED_STATUS;
+  const isTranscribing = status === "Transcribing...";
+  const isRecording = status === "Listening..." && state.voiceAudioBytes > 0;
 
   lines.push(line(buildHeaderLine(`Voice: ${sender}`, ""), "inverted"));
 
@@ -743,7 +981,9 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
         ? "Review reply"
         : isSpeechUnavailable
           ? "Voice unavailable"
-          : "Listening...",
+          : isTranscribing
+            ? "Processing audio"
+            : "Listening...",
       "normal",
     ),
     line(truncate(voiceBody, 38), "normal"),
@@ -762,8 +1002,12 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
         : isSpeechUnavailable
           ? status === VOICE_NOT_CONFIGURED_STATUS
             ? "Configure Speech in Settings"
-            : "Live mic capture not available"
-          : "Speak now",
+            : "Click to retry"
+          : isTranscribing
+            ? "Please wait"
+            : isRecording
+              ? "Click when done"
+              : "Speak now",
       "meta",
     ),
   );
@@ -874,7 +1118,7 @@ function getDemoChats(): BeeperChat[] {
     {
       id: "1",
       accountID: "whatsapp",
-      title: "John Doe",
+      title: "Sample Chat",
       type: "single",
       participants: { items: [], hasMore: false, total: 2 },
       lastActivity: new Date().toISOString(),
@@ -964,8 +1208,8 @@ function getDemoMessages(): BeeperMessage[] {
       id: "1",
       chatID: "1",
       accountID: "demo",
-      senderID: "john",
-      senderName: "John Doe",
+      senderID: "sample",
+      senderName: "Sample Chat",
       timestamp: new Date(Date.now() - 3600000).toISOString(),
       sortKey: "1",
       type: "TEXT",
@@ -990,8 +1234,8 @@ function getDemoMessages(): BeeperMessage[] {
       id: "3",
       chatID: "1",
       accountID: "demo",
-      senderID: "john",
-      senderName: "John Doe",
+      senderID: "sample",
+      senderName: "Sample Chat",
       timestamp: new Date(Date.now() - 1800000).toISOString(),
       sortKey: "3",
       type: "TEXT",
@@ -1038,8 +1282,11 @@ export function GlassesUI({
     isLoading: true,
     messageLoadingTimedOut: false,
     messageLoadFailed: false,
+    setupRequired: false,
     messageScrollOffset: 0,
     messageDetailScrollOffset: 0,
+    messageDetailImageTile: null,
+    messageDetailImageStatus: "none",
     demoMode: false,
     voiceStatus: null,
     voiceTranscript: "",
@@ -1051,7 +1298,9 @@ export function GlassesUI({
     selectedAccount: null,
     selectedChat: null,
   });
-  const speechRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const voiceAudioChunksRef = useRef<Uint8Array[]>([]);
+  const isVoiceRecordingRef = useRef<boolean>(false);
+  const isVoiceTranscribingRef = useRef<boolean>(false);
   const isVoiceCancelledRef = useRef<boolean>(false);
   const evenHubUnsubscribeRef = useRef<(() => void) | null>(null);
   const nativeOverlayEventUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -1099,15 +1348,7 @@ export function GlassesUI({
 
   const stopVoiceReply = useCallback(async (cancelled = false) => {
     isVoiceCancelledRef.current = cancelled;
-
-    if (speechRecognitionRef.current) {
-      const recognition = speechRecognitionRef.current;
-      speechRecognitionRef.current = null;
-      recognition.onresult = null;
-      recognition.onerror = null;
-      recognition.onend = null;
-      recognition.stop();
-    }
+    isVoiceRecordingRef.current = false;
 
     if (evenHubUnsubscribeRef.current) {
       evenHubUnsubscribeRef.current();
@@ -1208,12 +1449,12 @@ export function GlassesUI({
       return;
     }
 
-    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
-    if (!SpeechRecognitionCtor) {
+    const bridge = await getBridge();
+    if (!bridge) {
       setState((s) => ({
         ...s,
         currentScreen: "voiceReply",
-        voiceStatus: VOICE_NOT_SUPPORTED_STATUS,
+        voiceStatus: VOICE_MIC_UNAVAILABLE_STATUS,
         voiceTranscript: "",
         voiceAudioBytes: 0,
       }));
@@ -1221,99 +1462,143 @@ export function GlassesUI({
     }
 
     isVoiceCancelledRef.current = false;
+    isVoiceRecordingRef.current = true;
+    isVoiceTranscribingRef.current = false;
+    voiceAudioChunksRef.current = [];
     setState((s) => ({
       ...s,
       currentScreen: "voiceReply",
-      voiceStatus: "Speak now",
+      voiceStatus: "Listening...",
       voiceTranscript: "",
       voiceAudioBytes: 0,
     }));
 
-    const bridge = await getBridge();
-    if (bridge) {
-      try {
-        evenHubUnsubscribeRef.current = bridge.onEvenHubEvent(
-          (event: EvenHubEvent) => {
-            if (event.listEvent) {
-              console.log(
-                "[GlassesUI] List selected:",
-                event.listEvent.currentSelectItemName,
-              );
-            } else if (event.textEvent) {
-              console.log("[GlassesUI] Text event:", event.textEvent);
-            } else if (event.sysEvent) {
-              console.log(
-                "[GlassesUI] System event:",
-                event.sysEvent.eventType,
-              );
-            } else if (event.audioEvent) {
-              const pcm = event.audioEvent.audioPcm;
-              const pcmLength = pcm?.length || 0;
-              console.log("[GlassesUI] Audio PCM length:", pcmLength);
-              setState((s) => ({
-                ...s,
-                voiceAudioBytes: s.voiceAudioBytes + pcmLength,
-              }));
-            }
-          },
-        );
-        await bridge.audioControl(true);
-      } catch (e) {
-        console.warn("[GlassesUI] Failed to open microphone:", e);
+    try {
+      evenHubUnsubscribeRef.current = bridge.onEvenHubEvent(
+        (event: EvenHubEvent) => {
+          if (!event.audioEvent || !isVoiceRecordingRef.current) {
+            return;
+          }
+
+          const pcm = event.audioEvent.audioPcm;
+          const pcmLength = pcm?.length || 0;
+          if (pcmLength === 0) {
+            return;
+          }
+
+          voiceAudioChunksRef.current.push(new Uint8Array(pcm));
+          setState((s) => ({
+            ...s,
+            voiceAudioBytes: s.voiceAudioBytes + pcmLength,
+          }));
+        },
+      );
+
+      const audioOpened = await bridge.audioControl(true);
+      if (!audioOpened) {
+        throw new Error("EvenHub microphone request was rejected");
       }
-    }
-
-    const recognition = new SpeechRecognitionCtor();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event) => {
-      const result = event.results[event.results.length - 1];
-      const transcript = result?.[0]?.transcript?.trim() || "";
-      if (!transcript) return;
-
-      setState((s) => ({
-        ...s,
-        voiceStatus: result.isFinal ? "Ready to send" : "Listening...",
-        voiceTranscript: transcript,
-      }));
-    };
-
-    recognition.onerror = (event) => {
-      const errorMessage = event.error || "Voice failed";
-      void stopVoiceReply(false);
+    } catch (e) {
+      console.warn("[GlassesUI] Failed to open microphone:", e);
+      await stopVoiceReply(true);
       setState((s) => ({
         ...s,
         currentScreen: "voiceReply",
-        voiceStatus: errorMessage,
+        voiceStatus: VOICE_MIC_UNAVAILABLE_STATUS,
         voiceTranscript: "",
         voiceAudioBytes: 0,
       }));
-    };
+    }
+  }, [speechConfig, stopVoiceReply]);
 
-    recognition.onend = () => {
-      speechRecognitionRef.current = null;
+  const finishVoiceRecording = useCallback(async () => {
+    if (isVoiceTranscribingRef.current) {
+      return;
+    }
+
+    if (
+      !speechConfig?.baseUrl ||
+      !speechConfig?.token ||
+      !speechConfig?.model
+    ) {
+      setState((s) => ({
+        ...s,
+        currentScreen: "voiceReply",
+        voiceStatus: VOICE_NOT_CONFIGURED_STATUS,
+        voiceTranscript: "",
+        voiceAudioBytes: 0,
+      }));
+      return;
+    }
+
+    isVoiceTranscribingRef.current = true;
+    const audioChunks = voiceAudioChunksRef.current;
+    await stopVoiceReply(false);
+
+    if (audioChunks.length === 0) {
+      isVoiceTranscribingRef.current = false;
+      setState((s) => ({
+        ...s,
+        voiceStatus: "No audio captured",
+        voiceTranscript: "",
+      }));
+      return;
+    }
+
+    setState((s) => ({
+      ...s,
+      voiceStatus: "Transcribing...",
+      voiceTranscript: "",
+    }));
+
+    try {
+      const transcript = await transcribePcmAudio(
+        speechConfig,
+        mergeAudioChunks(audioChunks),
+      );
       if (isVoiceCancelledRef.current) {
-        setState((s) => ({
-          ...s,
-          voiceStatus: null,
-          voiceTranscript: "",
-          voiceAudioBytes: 0,
-        }));
         return;
       }
 
       setState((s) => ({
         ...s,
-        voiceStatus: s.voiceTranscript ? "Ready to send" : "Speak now",
+        voiceStatus: transcript ? "Ready to send" : "No speech detected",
+        voiceTranscript: transcript,
       }));
-    };
-
-    speechRecognitionRef.current = recognition;
-    recognition.start();
+    } catch (e) {
+      console.warn("[GlassesUI] Failed to transcribe voice reply:", e);
+      if (!isVoiceCancelledRef.current) {
+        setState((s) => ({
+          ...s,
+          voiceStatus: VOICE_TRANSCRIPTION_FAILED_STATUS,
+          voiceTranscript: "",
+        }));
+      }
+    } finally {
+      isVoiceTranscribingRef.current = false;
+    }
   }, [speechConfig, stopVoiceReply]);
+
+  const handleVoiceReplySelect = useCallback(() => {
+    const currentState = stateRef.current;
+    if (currentState.voiceTranscript.trim()) {
+      void submitVoiceReply();
+      return;
+    }
+
+    if (isVoiceRecordingRef.current) {
+      void finishVoiceRecording();
+      return;
+    }
+
+    if (
+      currentState.voiceStatus &&
+      currentState.voiceStatus !== VOICE_NOT_CONFIGURED_STATUS &&
+      currentState.voiceStatus !== "Transcribing..."
+    ) {
+      void startVoiceReply();
+    }
+  }, [finishVoiceRecording, startVoiceReply, submitVoiceReply]);
 
   const showQuickReplyOverlay = useCallback(async () => {
     const bridge = await getBridge();
@@ -1483,20 +1768,26 @@ export function GlassesUI({
           return;
         }
 
+        const action = mapGlassEvent(event);
+        if (action?.type === "GO_BACK") {
+          void dismissVoiceReply();
+          return;
+        }
+
+        if (action?.type === "SELECT_HIGHLIGHTED") {
+          handleVoiceReplySelect();
+          return;
+        }
+
         if (
           event.listEvent &&
           event.listEvent.currentSelectItemName === "Send"
         ) {
           void submitVoiceReply();
-          return;
-        }
-
-        if (event.textEvent || event.sysEvent) {
-          void dismissVoiceReply();
         }
       },
     );
-  }, [dismissVoiceReply, state, stopNativeOverlayEvents, submitVoiceReply]);
+  }, [dismissVoiceReply, handleVoiceReplySelect, state, stopNativeOverlayEvents, submitVoiceReply]);
 
   const showMessageDetailOverlay = useCallback(async (msg: BeeperMessage) => {
     const bridge = await getBridge();
@@ -1510,33 +1801,68 @@ export function GlassesUI({
       fullContent,
       MESSAGE_DETAIL_REBUILD_MAX_CHARS,
     );
+    const imageUrl = getMessageImageUrl(msg, beeperConfig?.baseUrl);
+    let imageBytes: Uint8Array | null = null;
+
+    if (imageUrl) {
+      try {
+        imageBytes = await loadMessageMediaImageBytes(imageUrl);
+      } catch (e) {
+        console.warn("[GlassesUI] Failed to load message image:", e);
+      }
+    }
 
     const textContainer = new TextContainerProperty({
       containerID: MESSAGE_DETAIL_CONTAINER.TEXT_ID,
       containerName: MESSAGE_DETAIL_CONTAINER.TEXT_NAME,
-      xPosition: 8,
-      yPosition: 8,
-      width: 560,
-      height: 272,
+      xPosition: 0,
+      yPosition: 0,
+      width: GLASSES_DISPLAY_WIDTH,
+      height: GLASSES_DISPLAY_HEIGHT,
       content: rebuildContent,
-      borderWidth: 1,
-      borderColor: 15,
-      borderRadius: 8,
-      paddingLength: 10,
+      borderWidth: 0,
+      borderColor: 0,
+      borderRadius: 0,
+      paddingLength: 6,
       isEventCapture: 1,
     });
 
     const rebuildContainer = new RebuildPageContainer({
-      containerTotalNum: 1,
+      containerTotalNum: imageBytes ? 2 : 1,
       textObject: [textContainer],
       listObject: [],
-      imageObject: [],
+      imageObject: imageBytes
+        ? [
+            new ImageContainerProperty({
+              containerID: MESSAGE_DETAIL_CONTAINER.IMAGE_ID,
+              containerName: MESSAGE_DETAIL_CONTAINER.IMAGE_NAME,
+              xPosition: MESSAGE_MEDIA_IMAGE_X,
+              yPosition: MESSAGE_MEDIA_IMAGE_Y,
+              width: MESSAGE_MEDIA_IMAGE_WIDTH,
+              height: MESSAGE_MEDIA_IMAGE_HEIGHT,
+            }),
+          ]
+        : [],
     });
 
     const rebuildOk = await bridge.rebuildPageContainer(rebuildContainer);
     if (!rebuildOk) {
       console.warn("[GlassesUI] Failed to build message detail overlay");
       return;
+    }
+
+    if (imageBytes) {
+      try {
+        await bridge.updateImageRawData(
+          new ImageRawDataUpdate({
+            containerID: MESSAGE_DETAIL_CONTAINER.IMAGE_ID,
+            containerName: MESSAGE_DETAIL_CONTAINER.IMAGE_NAME,
+            imageData: imageBytes,
+          }),
+        );
+      } catch (e) {
+        console.warn("[GlassesUI] Failed to send message image:", e);
+      }
     }
 
     if (fullContent !== rebuildContent) {
@@ -1590,7 +1916,7 @@ export function GlassesUI({
         }
       },
     );
-  }, [hideNativeOverlay, stopNativeOverlayEvents]);
+  }, [beeperConfig?.baseUrl, hideNativeOverlay, stopNativeOverlayEvents]);
 
   // Demo mode: click timestamps tracked in onGlassAction
   const clickTimestamps = useRef<number[]>([]);
@@ -1661,16 +1987,17 @@ export function GlassesUI({
 
     async function loadData(savedState: SavedState) {
       try {
-        let accounts: BeeperAccount[] = [];
-        if (beeper) {
-          accounts = await beeper.listAccounts();
+        if (!beeper) {
+          throw new Error("Beeper is not configured");
         }
 
-        // If we have a saved state with an account, load chats for that account first
-        // Otherwise, use demo data if no real accounts
-        const shouldUseDemo = accounts.length === 0;
+        const accounts = await beeper.listAccounts();
 
-        if (savedState.selectedChat && !shouldUseDemo) {
+        // If we have a saved state with an account, load chats for that account first
+        // Otherwise, show the chat list once configuration is valid.
+        const setupRequired = accounts.length === 0;
+
+        if (savedState.selectedChat && !setupRequired) {
           // We have a saved chat and real accounts - try to restore it
           await restoreSavedChat(
             accounts,
@@ -1678,56 +2005,16 @@ export function GlassesUI({
             savedState.selectedChat,
           );
         } else {
-          // No saved chat or demo mode - set initial state normally
-          const initialChats = shouldUseDemo ? getDemoChats() : [];
-
+          // No saved chat, or Beeper needs configuration.
           setState((s) => ({
             ...s,
             accounts,
-            chats: initialChats,
+            chats: [],
             isLoading: false,
+            setupRequired,
           }));
 
-          // Demo mode: check if saved chat exists in demo data
-          if (savedState.selectedChat && shouldUseDemo) {
-            const chatExists = initialChats.some(
-              (c) => c.id === savedState.selectedChat,
-            );
-            if (chatExists) {
-              void loadMessages(savedState.selectedChat);
-            } else {
-              // Chat no longer exists, go back to chats list
-              await saveState({
-                selectedAccount: savedState.selectedAccount,
-                selectedChat: null,
-              });
-              setState((s) => ({
-                ...s,
-                selectedAccount: savedState.selectedAccount,
-                selectedChat: null,
-              }));
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("[GlassesUI] Using demo data");
-        const demoChats = getDemoChats();
-
-        setState((s) => ({
-          ...s,
-          chats: demoChats,
-          isLoading: false,
-        }));
-
-        // If we had a saved chat, try to restore it in demo mode
-        if (savedState.selectedChat) {
-          const chatExists = demoChats.some(
-            (c) => c.id === savedState.selectedChat,
-          );
-          if (chatExists) {
-            void loadMessages(savedState.selectedChat);
-          } else {
-            // Chat no longer exists, go back to chats list
+          if (savedState.selectedChat && setupRequired) {
             await saveState({
               selectedAccount: savedState.selectedAccount,
               selectedChat: null,
@@ -1738,6 +2025,24 @@ export function GlassesUI({
               selectedChat: null,
             }));
           }
+        }
+      } catch (e) {
+        console.warn("[GlassesUI] Beeper setup required:", e);
+
+        setState((s) => ({
+          ...s,
+          accounts: [],
+          chats: [],
+          selectedChat: null,
+          isLoading: false,
+          setupRequired: true,
+        }));
+
+        if (savedState.selectedChat) {
+          await saveState({
+            selectedAccount: savedState.selectedAccount,
+            selectedChat: null,
+          });
         }
       }
     }
@@ -1769,6 +2074,7 @@ export function GlassesUI({
             selectedChat: savedChatId,
             highlightedIndex: 0,
             isLoading: true,
+            setupRequired: false,
           }));
           void loadMessages(savedChatId);
         } else {
@@ -1784,6 +2090,7 @@ export function GlassesUI({
             selectedAccount: savedAccountId,
             selectedChat: null,
             isLoading: false,
+            setupRequired: false,
           }));
         }
       } catch (err) {
@@ -1800,6 +2107,7 @@ export function GlassesUI({
           selectedAccount: savedAccountId,
           selectedChat: null,
           isLoading: false,
+          setupRequired: true,
         }));
       }
     }
@@ -1893,6 +2201,99 @@ export function GlassesUI({
       stopVoiceReply(true);
     };
   }, [stopVoiceReply]);
+
+  useEffect(() => {
+    if (state.currentScreen !== "messageDetail") {
+      if (state.messageDetailImageTile || state.messageDetailImageStatus !== "none") {
+        setState((s) =>
+          s.messageDetailImageTile || s.messageDetailImageStatus !== "none"
+            ? { ...s, messageDetailImageTile: null, messageDetailImageStatus: "none" }
+            : s,
+        );
+      }
+      return;
+    }
+
+    const msg = state.messages[state.selectedMessageIndex];
+    if (!msg) return;
+
+    const imageUrl = getMessageImageUrl(msg, beeperConfig?.baseUrl);
+    if (!imageUrl) {
+      if (state.messageDetailImageTile || state.messageDetailImageStatus !== "none") {
+        setState((s) =>
+          s.messageDetailImageTile || s.messageDetailImageStatus !== "none"
+            ? { ...s, messageDetailImageTile: null, messageDetailImageStatus: "none" }
+            : s,
+        );
+      }
+      return;
+    }
+
+    if (
+      state.messageDetailImageTile?.messageId === msg.id &&
+      state.messageDetailImageTile.url === imageUrl
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    setState((s) =>
+      s.messageDetailImageTile || s.messageDetailImageStatus !== "loading"
+        ? { ...s, messageDetailImageTile: null, messageDetailImageStatus: "loading" }
+        : s,
+    );
+
+    loadMessageMediaImageBytes(imageUrl)
+      .then((bytes) => {
+        if (cancelled) return;
+
+        setState((s) => {
+          const selected = s.messages[s.selectedMessageIndex];
+          if (s.currentScreen !== "messageDetail" || selected?.id !== msg.id) {
+            return s;
+          }
+
+          return bytes.length > 0
+            ? {
+                ...s,
+                messageDetailImageTile: {
+                  messageId: msg.id,
+                  url: imageUrl,
+                  bytes,
+                },
+                messageDetailImageStatus: "loaded",
+              }
+            : { ...s, messageDetailImageStatus: "failed" };
+        });
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.warn("[GlassesUI] Failed to load message image:", e);
+          setState((s) => {
+            const selected = s.messages[s.selectedMessageIndex];
+            if (s.currentScreen !== "messageDetail" || selected?.id !== msg.id) {
+              return s;
+            }
+
+            return {
+              ...s,
+              messageDetailImageTile: null,
+              messageDetailImageStatus: "failed",
+            };
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    beeperConfig?.baseUrl,
+    state.currentScreen,
+    state.messageDetailImageTile,
+    state.messages,
+    state.selectedMessageIndex,
+  ]);
 
   useEffect(() => {
     if (!ENABLE_CUSTOM_GLASSES_RENDERER) {
@@ -2012,6 +2413,8 @@ export function GlassesUI({
             updates.currentScreen = "messageDetail";
             updates.selectedMessageIndex = s.messageScrollOffset;
             updates.messageDetailScrollOffset = 0;
+            updates.messageDetailImageTile = null;
+            updates.messageDetailImageStatus = "none";
             if (ENABLE_CUSTOM_GLASSES_RENDERER) {
               void showMessageDetailOverlay(selectedMsg);
             }
@@ -2023,6 +2426,8 @@ export function GlassesUI({
           updates.currentScreen = "quickReply";
           updates.highlightedIndex = 0;
           updates.messageDetailScrollOffset = 0;
+          updates.messageDetailImageTile = null;
+          updates.messageDetailImageStatus = "none";
           break;
         }
 
@@ -2049,9 +2454,7 @@ export function GlassesUI({
         }
 
         case "voiceReply": {
-          if (s.voiceTranscript.trim()) {
-            void submitVoiceReply();
-          }
+          handleVoiceReplySelect();
           updates.highlightedIndex = 0;
           break;
         }
@@ -2059,7 +2462,13 @@ export function GlassesUI({
 
       return updates;
     },
-    [beeper, startVoiceReply, submitVoiceReply, showMessageDetailOverlay],
+    [
+      beeper,
+      handleVoiceReplySelect,
+      startVoiceReply,
+      submitVoiceReply,
+      showMessageDetailOverlay,
+    ],
   );
 
   // Handle back
@@ -2086,6 +2495,8 @@ export function GlassesUI({
         case "messageDetail":
           updates.currentScreen = "messages";
           updates.messageDetailScrollOffset = 0;
+          updates.messageDetailImageTile = null;
+          updates.messageDetailImageStatus = "none";
           break;
         case "quickReply":
           updates.currentScreen = "messages";
@@ -2116,6 +2527,7 @@ export function GlassesUI({
         ...s,
         chats: options?.preserveExisting ? s.chats : [],
         isLoading: true,
+        setupRequired: false,
       }));
     }
 
@@ -2131,25 +2543,27 @@ export function GlassesUI({
           ...s,
           chats: demoChats,
           isLoading: false,
+          setupRequired: false,
         };
       });
       return;
     }
 
     try {
-      let chats: BeeperChat[] = [];
-      if (beeper) {
-        const result = await beeper.listChats(
-          accountId ? { accountIDs: [accountId] } : undefined,
-        );
-        chats = result.chats;
+      if (!beeper) {
+        throw new Error("Beeper is not configured");
       }
-      const finalChats = chats.length > 0 ? chats : getDemoChats();
+
+      const result = await beeper.listChats(
+        accountId ? { accountIDs: [accountId] } : undefined,
+      );
+      const finalChats = result.chats;
       setState((s) => {
         const sameChats = areChatsEqual(s.chats, finalChats);
         const sameLoading = options?.silent ? true : s.isLoading === false;
+        const sameSetup = !s.setupRequired;
 
-        if (sameChats && sameLoading) {
+        if (sameChats && sameLoading && sameSetup) {
           return s;
         }
 
@@ -2157,22 +2571,24 @@ export function GlassesUI({
           ...s,
           chats: finalChats,
           isLoading: options?.silent ? s.isLoading : false,
+          setupRequired: false,
         };
       });
     } catch {
-      const demoChats = getDemoChats();
       setState((s) => {
-        const sameChats = areChatsEqual(s.chats, demoChats);
+        const sameChats = s.chats.length === 0;
         const sameLoading = options?.silent ? true : s.isLoading === false;
+        const sameSetup = s.setupRequired;
 
-        if (sameChats && sameLoading) {
+        if (sameChats && sameLoading && sameSetup) {
           return s;
         }
 
         return {
           ...s,
-          chats: demoChats,
+          chats: [],
           isLoading: options?.silent ? s.isLoading : false,
+          setupRequired: true,
         };
       });
     }
@@ -2190,6 +2606,7 @@ export function GlassesUI({
         isLoading: true,
         messageLoadingTimedOut: false,
         messageLoadFailed: false,
+        setupRequired: false,
       }));
     }
 
@@ -2216,6 +2633,7 @@ export function GlassesUI({
           isLoading: false,
           messageLoadingTimedOut: false,
           messageLoadFailed: false,
+          setupRequired: false,
           highlightedIndex: options?.silent ? s.highlightedIndex : 0,
           messageScrollOffset: nextScroll,
         };
@@ -2254,6 +2672,7 @@ export function GlassesUI({
             ? s.messageLoadingTimedOut
             : false,
           messageLoadFailed: false,
+          setupRequired: false,
           highlightedIndex: options?.silent ? s.highlightedIndex : 0,
           messageScrollOffset: nextScroll,
         };
@@ -2277,6 +2696,7 @@ export function GlassesUI({
             ? s.messageLoadingTimedOut
             : false,
           messageLoadFailed: true,
+          setupRequired: true,
           highlightedIndex: options?.silent ? s.highlightedIndex : 0,
           messageScrollOffset: 0,
         };
@@ -2327,7 +2747,14 @@ export function GlassesUI({
         case "messages":
           return buildMessagesDisplay(snapshot, nav.highlightedIndex);
         case "messageDetail":
-          return buildMessageDetailDisplay(snapshot);
+          return buildMessageDetailDisplay(
+            snapshot,
+            snapshot.messageDetailImageTile &&
+              snapshot.messageDetailImageTile.messageId ===
+                snapshot.messages[snapshot.selectedMessageIndex]?.id
+              ? "loaded"
+              : snapshot.messageDetailImageStatus,
+          );
         case "quickReply":
           return buildQuickReplyDisplay(snapshot, nav.highlightedIndex);
         case "voiceReply":
@@ -2491,6 +2918,30 @@ export function GlassesUI({
     }),
     [getDisplayLines],
   );
+
+  const getPageMode = useCallback(
+    (_screen: string): "text" | "home" =>
+      stateRef.current.currentScreen === "messageDetail" &&
+      stateRef.current.messageDetailImageTile
+        ? "home"
+        : "text",
+    [],
+  );
+
+  const homeImageTiles = state.messageDetailImageTile
+    && state.messageDetailImageTile.bytes.length > 0
+    ? [
+        {
+          id: MESSAGE_DETAIL_CONTAINER.IMAGE_ID,
+          name: MESSAGE_DETAIL_CONTAINER.IMAGE_NAME,
+          bytes: state.messageDetailImageTile.bytes,
+          x: MESSAGE_MEDIA_IMAGE_X,
+          y: MESSAGE_MEDIA_IMAGE_Y,
+          w: MESSAGE_MEDIA_IMAGE_WIDTH,
+          h: MESSAGE_MEDIA_IMAGE_HEIGHT,
+        },
+      ]
+    : undefined;
 
   const ensureGlassesStartup = useCallback(async (bridge: EvenAppBridge) => {
     if (glassesInitializedRef.current) {
@@ -2882,6 +3333,8 @@ export function GlassesUI({
         currentScreen={state.currentScreen}
         toDisplayData={toDisplayData}
         onGlassAction={onGlassAction}
+        getPageMode={getPageMode}
+        homeImageTiles={homeImageTiles}
       />
     );
   }
@@ -2895,6 +3348,8 @@ function ToolkitGlassesBridge({
   currentScreen,
   toDisplayData,
   onGlassAction,
+  getPageMode,
+  homeImageTiles,
 }: {
   state: AppState;
   currentScreen: Screen;
@@ -2907,6 +3362,16 @@ function ToolkitGlassesBridge({
     nav: GlassNavState,
     snapshot: AppState,
   ) => GlassNavState;
+  getPageMode: (screen: string) => "text" | "home";
+  homeImageTiles?: {
+    id: number;
+    name: string;
+    bytes: Uint8Array;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }[];
 }) {
   const deriveScreen = useCallback(
     (_path: string) => currentScreen,
@@ -2919,6 +3384,8 @@ function ToolkitGlassesBridge({
     onGlassAction,
     deriveScreen,
     appName: "even-messages",
+    getPageMode,
+    homeImageTiles,
   });
 
   return null;

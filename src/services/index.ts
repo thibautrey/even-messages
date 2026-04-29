@@ -1,4 +1,5 @@
 export { BeeperClient, formatMessageText, type BeeperAccount, type BeeperChat, type BeeperMessage, type BeeperUser, type SendMessagePayload, type BeeperWebSocketEvent, type BeeperConfig } from './beeperClient'
+export { findBeeperDesktop, type BeeperDiscoveryProgress, type BeeperDiscoveryResult } from './beeperDiscovery'
 export { authenticateWithBeeper, handleAuthCallback, hasPendingAuth } from './beeperAuth'
 export { listSpeechProviderModels, type SpeechProviderModel } from './speechProvider'
 export {

@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import {
   BeeperAccount,
   BeeperChat,
+  BeeperDiscoveryProgress,
+  findBeeperDesktop,
   formatMessageText,
   getApiConfig,
   listSpeechProviderModels,
@@ -13,6 +15,7 @@ import styles from "./DevModeUI.module.css";
 
 const TAILSCALE_SETUP_URL =
   "https://github.com/thibautrey/even-messages/blob/main/docs/TAILSCALE_SETUP.md";
+const TOKEN_GUIDE_GIF_URL = "/beeper-token-guide.gif";
 
 function getHostnameFromBaseUrl(baseUrl?: string | null): string | null {
   if (!baseUrl) return null;
@@ -43,6 +46,19 @@ function isProbablyTailscaleAddress(hostname: string): boolean {
     hostname.endsWith(".ts.net") ||
     hostname.endsWith(".tailscale.net")
   );
+}
+
+function getDiscoveryStatusMessage(
+  isFindingComputer: boolean,
+  progress: BeeperDiscoveryProgress | null,
+  error: string | null,
+): string | null {
+  if (isFindingComputer) {
+    if (!progress) return "Looking for Beeper Desktop on this network...";
+    return `Looking for Beeper Desktop... ${progress.scanned}/${progress.total}`;
+  }
+
+  return error;
 }
 
 // Debug logging system
@@ -418,45 +434,8 @@ export function DevModeUI({
       {/* Main Content */}
       <main className={styles.main}>
         {!isAuthenticated && !isLoading && (
-          /* Settings Form - always visible when not authenticated */
           <div className={styles.loginSection}>
-            <div className={styles.loginCard}>
-              <h2>Configuration</h2>
-              <div className={styles.instructions}>
-                <p>
-                  <strong>To get your token:</strong>
-                </p>
-                <ol>
-                  <li>
-                    Open the <strong>Beeper Desktop App on your computer</strong>
-                  </li>
-                  <li>
-                    Go to <strong>Settings</strong> →{" "}
-                    <strong>Developer Mode</strong>
-                  </li>
-                  <li>
-                    Start the <strong>Development Server</strong>
-                  </li>
-                  <li>
-                    Scroll to the bottom of the developer page and{" "}
-                    <strong>create a token</strong>
-                  </li>
-                </ol>
-              </div>
-              <SettingsForm onSave={onSaveSettings!} savedConfig={apiConfig} />
-              <p className={styles.helpText}>
-                Need to use the app away from home?{" "}
-                <a
-                  href={TAILSCALE_SETUP_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={styles.helpLink}
-                >
-                  Read the Tailscale setup guide
-                </a>
-                .
-              </p>
-            </div>
+            <SettingsForm onSave={onSaveSettings!} savedConfig={apiConfig} />
           </div>
         )}
 
@@ -702,11 +681,47 @@ function SettingsForm({
   savedConfig?: { baseUrl: string; token: string } | null;
   defaultOpen?: boolean;
 }) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [baseUrl, setBaseUrl] = useState(
     savedConfig?.baseUrl || "http://YOUR_COMPUTER_IP:23373",
   );
   const [token, setToken] = useState(savedConfig?.token || "");
   const [showToken, setShowToken] = useState(false);
+  const [showTokenGuide, setShowTokenGuide] = useState(false);
+  const [isFindingComputer, setIsFindingComputer] = useState(false);
+  const [wasComputerFound, setWasComputerFound] = useState(false);
+  const [discoveryProgress, setDiscoveryProgress] =
+    useState<BeeperDiscoveryProgress | null>(null);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+
+  const handleFindComputer = async () => {
+    if (isFindingComputer) return;
+
+    setIsFindingComputer(true);
+    setStep(2);
+    setDiscoveryProgress(null);
+    setDiscoveryError(null);
+
+    try {
+      const result = await findBeeperDesktop(baseUrl, setDiscoveryProgress);
+      if (result) {
+        setBaseUrl(result.baseUrl);
+        setWasComputerFound(true);
+        setDiscoveryError(null);
+        setStep(3);
+      } else {
+        setWasComputerFound(false);
+        setDiscoveryError(
+          "Could not find Beeper Desktop. Make sure it is open and Developer Mode is running.",
+        );
+      }
+    } catch (err) {
+      console.error("Failed to find Beeper Desktop:", err);
+      setDiscoveryError("Could not scan this network from the browser.");
+    } finally {
+      setIsFindingComputer(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -715,53 +730,279 @@ function SettingsForm({
     }
   };
 
+  const discoveryStatus = getDiscoveryStatusMessage(
+    isFindingComputer,
+    discoveryProgress,
+    discoveryError,
+  );
+
+  useEffect(() => {
+    if (!showTokenGuide) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowTokenGuide(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showTokenGuide]);
+
   return (
-    <form onSubmit={handleSubmit} className={styles.settingsForm}>
-      <div className={styles.formGroup}>
-        <label htmlFor="baseUrl">API Base URL</label>
-        <input
-          id="baseUrl"
-          type="url"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="http://localhost:23373"
-          required
-        />
-        <span className={styles.hint}>
-          The ip and port where your Beeper Desktop app is running
-        </span>
+    <>
+    <form onSubmit={handleSubmit} className={styles.setupGuide}>
+      <div className={styles.setupHeader}>
+        <span className={styles.setupStepLabel}>Step {step} of 3</span>
+        <h2>Connect Beeper Desktop</h2>
+        <p>
+          Even Messages reads and sends your messages through Beeper Desktop.
+          Beeper needs to stay open on your computer while you use the glasses.
+        </p>
       </div>
 
-      <div className={styles.formGroup}>
-        <label htmlFor="token">API Token</label>
-        <div className={styles.tokenInputWrapper}>
-          <input
-            id="token"
-            type={showToken ? "text" : "password"}
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Enter your API token"
-            required
-          />
+      <div className={styles.setupProgress} aria-hidden="true">
+        <span className={step >= 1 ? styles.setupProgressActive : ""} />
+        <span className={step >= 2 ? styles.setupProgressActive : ""} />
+        <span className={step >= 3 ? styles.setupProgressActive : ""} />
+      </div>
+
+      {step === 1 && (
+        <section className={styles.setupStepPanel}>
+          <h3>Is Beeper installed and running?</h3>
+          <p>
+            Open Beeper Desktop on the computer that has access to your
+            messages. In Beeper, open Developer Mode and start the Development
+            Server.
+          </p>
+          <p>
+            If you do not have Beeper yet, download it from{" "}
+            <a
+              href="https://www.beeper.com/"
+              target="_blank"
+              rel="noreferrer"
+              className={styles.helpLink}
+            >
+              beeper.com
+            </a>
+            .
+          </p>
+          <div className={styles.setupActions}>
+            <button
+              type="button"
+              className={styles.loginButton}
+              onClick={handleFindComputer}
+              disabled={isFindingComputer}
+            >
+              Yes, find my computer
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 2 && (
+        <section className={styles.setupStepPanel}>
+          <h3>Find the computer</h3>
+          <p>
+            Even Messages will scan your local network for the Beeper Desktop
+            development server and fill in the computer address automatically.
+          </p>
+
+          <div className={styles.formGroup}>
+            <label htmlFor="baseUrl">Computer address</label>
+            <div className={styles.urlInputRow}>
+              <input
+                id="baseUrl"
+                type="url"
+                value={baseUrl}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  setWasComputerFound(false);
+                }}
+                placeholder="http://localhost:23373"
+                className={wasComputerFound ? styles.discoveredInput : undefined}
+                required
+              />
+              <button
+                type="button"
+                className={styles.findComputerButton}
+                onClick={handleFindComputer}
+                disabled={isFindingComputer}
+              >
+                {isFindingComputer ? "Finding..." : "Find computer"}
+              </button>
+            </div>
+            {discoveryStatus && (
+              <span
+                className={
+                  discoveryError ? styles.discoveryError : styles.discoveryStatus
+                }
+              >
+                {discoveryStatus}
+              </span>
+            )}
+          </div>
+
+          <div className={styles.setupActions}>
+            <button
+              type="button"
+              className={styles.cancelButton}
+              onClick={() => setStep(1)}
+              disabled={isFindingComputer}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              className={styles.loginButton}
+              onClick={() => setStep(3)}
+              disabled={!baseUrl.trim() || isFindingComputer}
+            >
+              Continue
+            </button>
+          </div>
+        </section>
+      )}
+
+      {step === 3 && (
+        <section className={styles.setupStepPanel}>
+          <h3>Add the Beeper token</h3>
+          <p>
+            The token lets Even Messages fetch your conversations and send
+            replies through Beeper Desktop.
+          </p>
+
           <button
             type="button"
-            className={styles.toggleToken}
-            onClick={() => setShowToken(!showToken)}
+            className={styles.tokenGuideMedia}
+            onClick={() => setShowTokenGuide(true)}
+            aria-label="Open token guide larger"
           >
-            {showToken ? "Hide" : "Show"}
+            <img
+              src={TOKEN_GUIDE_GIF_URL}
+              alt="How to create a Beeper Desktop API token"
+            />
+            <span className={styles.tokenGuideExpandHint}>Tap to expand</span>
           </button>
-        </div>
-        <span className={styles.hint}>
-          Paste your API token from Beeper's Developer Mode
-        </span>
-      </div>
 
-      <div className={styles.formActions}>
-        <button type="submit" className={styles.loginButton}>
-          Connect
-        </button>
-      </div>
+          <div className={styles.instructions}>
+            <ol>
+              <li>Open Beeper Desktop settings.</li>
+              <li>Go to Developer Mode.</li>
+              <li>Start the Development Server.</li>
+              <li>Create a token and paste it below.</li>
+            </ol>
+          </div>
+
+          <div className={styles.formGroup}>
+            <label htmlFor="token">API Token</label>
+            <div className={styles.tokenInputWrapper}>
+              <input
+                id="token"
+                type={showToken ? "text" : "password"}
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Paste your Beeper token"
+                required
+              />
+              <button
+                type="button"
+                className={styles.toggleToken}
+                onClick={() => setShowToken(!showToken)}
+              >
+                {showToken ? "Hide" : "Show"}
+              </button>
+            </div>
+          </div>
+
+          <details className={styles.manualAddressDetails}>
+            <summary>Computer address</summary>
+            <div className={styles.urlInputRow}>
+              <input
+                type="url"
+                value={baseUrl}
+                onChange={(e) => {
+                  setBaseUrl(e.target.value);
+                  setWasComputerFound(false);
+                }}
+                placeholder="http://localhost:23373"
+                className={wasComputerFound ? styles.discoveredInput : undefined}
+                required
+              />
+              <button
+                type="button"
+                className={styles.findComputerButton}
+                onClick={handleFindComputer}
+                disabled={isFindingComputer}
+              >
+                {isFindingComputer ? "Finding..." : "Find computer"}
+              </button>
+            </div>
+          </details>
+
+          <div className={styles.setupActions}>
+            <button
+              type="button"
+              className={styles.cancelButton}
+              onClick={() => setStep(2)}
+              disabled={isFindingComputer}
+            >
+              Back
+            </button>
+            <button
+              type="submit"
+              className={styles.loginButton}
+              disabled={!baseUrl.trim() || !token.trim() || isFindingComputer}
+            >
+              Connect
+            </button>
+          </div>
+
+          <p className={styles.helpText}>
+            Need to use the app away from home?{" "}
+            <a
+              href={TAILSCALE_SETUP_URL}
+              target="_blank"
+              rel="noreferrer"
+              className={styles.helpLink}
+            >
+              Read the Tailscale setup guide
+            </a>
+            .
+          </p>
+        </section>
+      )}
     </form>
+    {showTokenGuide && (
+      <div
+        className={styles.tokenGuideOverlay}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Beeper token guide"
+      >
+        <button
+          type="button"
+          className={styles.tokenGuideBackdrop}
+          aria-label="Close token guide"
+          onClick={() => setShowTokenGuide(false)}
+        />
+        <div className={styles.tokenGuideDialog}>
+          <button
+            type="button"
+            className={styles.tokenGuideClose}
+            onClick={() => setShowTokenGuide(false)}
+            aria-label="Close token guide"
+          >
+            ×
+          </button>
+          <img
+            src={TOKEN_GUIDE_GIF_URL}
+            alt="How to create a Beeper Desktop API token"
+          />
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -779,6 +1020,38 @@ function BeeperSettingsPane({
   );
   const [token, setToken] = useState(savedConfig?.token || "");
   const [showToken, setShowToken] = useState(false);
+  const [isFindingComputer, setIsFindingComputer] = useState(false);
+  const [wasComputerFound, setWasComputerFound] = useState(false);
+  const [discoveryProgress, setDiscoveryProgress] =
+    useState<BeeperDiscoveryProgress | null>(null);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+
+  const handleFindComputer = async () => {
+    if (isFindingComputer) return;
+
+    setIsFindingComputer(true);
+    setDiscoveryProgress(null);
+    setDiscoveryError(null);
+
+    try {
+      const result = await findBeeperDesktop(baseUrl, setDiscoveryProgress);
+      if (result) {
+        setBaseUrl(result.baseUrl);
+        setWasComputerFound(true);
+        setDiscoveryError(null);
+      } else {
+        setWasComputerFound(false);
+        setDiscoveryError(
+          "Could not find Beeper Desktop. Make sure it is open and Developer Mode is running.",
+        );
+      }
+    } catch (err) {
+      console.error("Failed to find Beeper Desktop:", err);
+      setDiscoveryError("Could not scan this network from the browser.");
+    } finally {
+      setIsFindingComputer(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -791,17 +1064,48 @@ function BeeperSettingsPane({
     <form onSubmit={handleSubmit} className={styles.modalBody}>
       <div className={styles.formGroup}>
         <label htmlFor="beeperBaseUrl">API Base URL</label>
-        <input
-          id="beeperBaseUrl"
-          type="url"
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="http://localhost:23373"
-          required
-        />
+        <div className={styles.urlInputRow}>
+          <input
+            id="beeperBaseUrl"
+            type="url"
+            value={baseUrl}
+            onChange={(e) => {
+              setBaseUrl(e.target.value);
+              setWasComputerFound(false);
+            }}
+            placeholder="http://localhost:23373"
+            className={wasComputerFound ? styles.discoveredInput : undefined}
+            required
+          />
+          <button
+            type="button"
+            className={styles.findComputerButton}
+            onClick={handleFindComputer}
+            disabled={isFindingComputer}
+          >
+            {isFindingComputer ? "Finding..." : "Find computer"}
+          </button>
+        </div>
         <span className={styles.hint}>
           The ip and port where your Beeper Desktop app is running
         </span>
+        {getDiscoveryStatusMessage(
+          isFindingComputer,
+          discoveryProgress,
+          discoveryError,
+        ) && (
+          <span
+            className={
+              discoveryError ? styles.discoveryError : styles.discoveryStatus
+            }
+          >
+            {getDiscoveryStatusMessage(
+              isFindingComputer,
+              discoveryProgress,
+              discoveryError,
+            )}
+          </span>
+        )}
       </div>
 
       <div className={styles.formGroup}>

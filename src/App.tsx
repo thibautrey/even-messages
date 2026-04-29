@@ -6,6 +6,7 @@ import {
   BeeperClient,
   BeeperAccount,
   BeeperChat,
+  findBeeperDesktop,
   getApiConfig,
   getSpeechApiConfig,
   updateApiConfig,
@@ -49,31 +50,52 @@ export default function App() {
   // Load real data
   const loadRealData = useCallback(async (baseUrl: string, token: string) => {
     const client = new BeeperClient({ baseUrl, token })
-    
-    try {
-      // Test connection
-      const info = await client.getInfo()
-      console.log('[App] Connected to API:', info.app?.version)
-      
-      // Load accounts
-      const accts = await client.listAccounts()
-      setAccounts(accts)
-      console.log('[App] Loaded accounts:', accts.length)
-      
-      // Load all chats
-      const { chats: chatList } = await client.listChats()
-      setChats(chatList)
-      console.log('[App] Loaded chats:', chatList.length)
-      
-      setError(null)
-    } catch (err) {
-      console.error('[App] Failed to load data:', err)
-      setError('Failed to connect to API. Check your settings.')
-      setIsAuthenticated(false)
-      setApiConfig(null)
-      await clearApiConfig()
-    }
+
+    // Test connection
+    const info = await client.getInfo()
+    console.log('[App] Connected to API:', info.app?.version)
+
+    // Load accounts
+    const accts = await client.listAccounts()
+    setAccounts(accts)
+    console.log('[App] Loaded accounts:', accts.length)
+
+    // Load all chats
+    const { chats: chatList } = await client.listChats()
+    setChats(chatList)
+    console.log('[App] Loaded chats:', chatList.length)
+
+    setError(null)
   }, [])
+
+  const clearFailedBeeperConnection = useCallback(async (message: string) => {
+    setError(message)
+    setIsAuthenticated(false)
+    setApiConfig(null)
+    await clearApiConfig()
+  }, [])
+
+  const connectWithDiscoveryFallback = useCallback(async (
+    baseUrl: string,
+    token: string,
+  ): Promise<{ baseUrl: string; token: string }> => {
+    try {
+      await loadRealData(baseUrl, token)
+      return { baseUrl, token }
+    } catch (err) {
+      console.warn('[App] Beeper connection failed, scanning network:', err)
+    }
+
+    const discovered = await findBeeperDesktop(baseUrl)
+    if (!discovered) {
+      throw new Error('Beeper Desktop was not found on the local network')
+    }
+
+    await loadRealData(discovered.baseUrl, token)
+    await updateApiConfig(discovered.baseUrl, token)
+    console.log('[App] Updated Beeper API URL after discovery:', discovered.baseUrl)
+    return { baseUrl: discovered.baseUrl, token }
+  }, [loadRealData])
 
   // Initialize on mount - check for stored config and disclaimer status
   useEffect(() => {
@@ -93,9 +115,19 @@ export default function App() {
         console.log('[App] API config loaded:', config ? 'found' : 'not found')
         if (config?.token) {
           console.log('[App] Token found, setting authenticated state')
-          setApiConfig(config)
-          setIsAuthenticated(true)
-          await loadRealData(config.baseUrl, config.token)
+          try {
+            const connectedConfig = await connectWithDiscoveryFallback(
+              config.baseUrl,
+              config.token,
+            )
+            setApiConfig(connectedConfig)
+            setIsAuthenticated(true)
+          } catch (err) {
+            console.error('[App] Failed to connect after discovery:', err)
+            await clearFailedBeeperConnection(
+              'Failed to connect to Beeper. Use Find computer or check your token.',
+            )
+          }
         } else {
           console.log('[App] No token found, staying in unauthenticated state')
         }
@@ -117,7 +149,7 @@ export default function App() {
     }
     
     init()
-  }, [])
+  }, [clearFailedBeeperConnection, connectWithDiscoveryFallback])
 
   // Restore last opened conversation after authentication and data load.
   // Default to the conversations list when nothing can be restored.
@@ -176,22 +208,18 @@ export default function App() {
     console.log('[App] Settings saved successfully')
     setApiConfig({ baseUrl, token })
     setShowSettings(false)
-    
+
     try {
-      const client = new BeeperClient({ baseUrl, token })
-      // Test connection
-      await client.getInfo()
-      
+      const connectedConfig = await connectWithDiscoveryFallback(baseUrl, token)
+      setApiConfig(connectedConfig)
       setIsAuthenticated(true)
-      await loadRealData(baseUrl, token)
     } catch (err) {
       console.error('[App] Connection failed:', err)
-      setError('Failed to connect. Check URL and token.')
-      setIsAuthenticated(false)
-      setApiConfig(null)
-      await clearApiConfig()
+      await clearFailedBeeperConnection(
+        'Failed to connect. Use Find computer or check your token.',
+      )
     }
-  }, [loadRealData])
+  }, [clearFailedBeeperConnection, connectWithDiscoveryFallback])
 
   const handleSaveSpeechSettings = useCallback(async (baseUrl: string, token: string, model: string) => {
     console.log('[App] Saving speech settings...')
