@@ -12,6 +12,10 @@
       "whitelist": [
         "*"
       ]
+    },
+    {
+      "desc": "Captures audio from the glasses microphone so you can dictate voice replies, which are transcribed and sent as messages.",
+      "name": "g2-microphone"
     }
   ],
   "supported_languages": [
