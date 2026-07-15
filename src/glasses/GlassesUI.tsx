@@ -132,6 +132,8 @@ const VOICE_NOT_CONFIGURED_STATUS = "Speech not configured in Settings";
 const MESSAGE_LOADING_HINT_DELAY_MS = 3000;
 const VOICE_MIC_UNAVAILABLE_STATUS = "Mic unavailable";
 const VOICE_TRANSCRIPTION_FAILED_STATUS = "Transcription failed";
+const VOICE_SENDING_STATUS = "Sending...";
+const VOICE_SEND_FAILED_STATUS = "Send failed - click to retry";
 const MESSAGE_DETAIL_REBUILD_MAX_CHARS = 950;
 const MESSAGE_DETAIL_UPGRADE_MAX_CHARS = 2000;
 const NATIVE_OVERLAY_EVENT_DEBOUNCE_MS = 250;
@@ -970,15 +972,22 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
     status === VOICE_MIC_UNAVAILABLE_STATUS ||
     status === VOICE_TRANSCRIPTION_FAILED_STATUS;
   const isTranscribing = status === "Transcribing...";
+  const isSending = status === VOICE_SENDING_STATUS;
+  const sendFailed = status === VOICE_SEND_FAILED_STATUS;
   const isRecording = status === "Listening..." && state.voiceAudioBytes > 0;
 
   lines.push(line(buildHeaderLine(`Voice: ${sender}`, ""), "inverted"));
 
-  const voiceBody = state.voiceTranscript || status;
+  const voiceBody =
+    isSending || sendFailed ? status : state.voiceTranscript || status;
   const bodyLines = [
     line(
-      isVoiceReady
-        ? "Review reply"
+      isSending
+        ? "Sending reply"
+        : sendFailed
+          ? "Reply not sent"
+          : isVoiceReady
+            ? "Review reply"
         : isSpeechUnavailable
           ? "Voice unavailable"
           : isTranscribing
@@ -997,8 +1006,12 @@ function buildVoiceReplyDisplay(state: AppState): DisplayLine[] {
   lines.push(sep());
   lines.push(
     line(
-      isVoiceReady
-        ? "Click to send"
+      isSending
+        ? "Please wait"
+        : sendFailed
+          ? "Click to retry"
+          : isVoiceReady
+            ? "Click to send"
         : isSpeechUnavailable
           ? status === VOICE_NOT_CONFIGURED_STATUS
             ? "Configure Speech in Settings"
@@ -1301,6 +1314,7 @@ export function GlassesUI({
   const voiceAudioChunksRef = useRef<Uint8Array[]>([]);
   const isVoiceRecordingRef = useRef<boolean>(false);
   const isVoiceTranscribingRef = useRef<boolean>(false);
+  const isVoiceSendingRef = useRef<boolean>(false);
   const isVoiceCancelledRef = useRef<boolean>(false);
   const evenHubUnsubscribeRef = useRef<(() => void) | null>(null);
   const nativeOverlayEventUnsubscribeRef = useRef<(() => void) | null>(null);
@@ -1416,21 +1430,37 @@ export function GlassesUI({
 
   const submitVoiceReply = useCallback(async () => {
     const transcript = state.voiceTranscript.trim();
-    if (!transcript) {
+    if (!transcript || isVoiceSendingRef.current) {
       return;
     }
 
-    await stopVoiceReply(false);
-    await hideNativeOverlay();
-    sendMessage(transcript);
-    setState((s) => ({
-      ...s,
-      currentScreen: "messages",
-      highlightedIndex: 0,
-      voiceStatus: null,
-      voiceTranscript: "",
-      voiceAudioBytes: 0,
-    }));
+    isVoiceSendingRef.current = true;
+    setState((s) => ({ ...s, voiceStatus: VOICE_SENDING_STATUS }));
+
+    // Start the API request without waiting for native bridge cleanup. Bridge
+    // calls can stall inside the Even WebView and previously made Send inert.
+    void stopVoiceReply(false);
+    const sent = await sendMessage(transcript);
+
+    if (sent) {
+      await hideNativeOverlay();
+      setState((s) => ({
+        ...s,
+        currentScreen: "messages",
+        highlightedIndex: 0,
+        voiceStatus: null,
+        voiceTranscript: "",
+        voiceAudioBytes: 0,
+      }));
+    } else {
+      setState((s) => ({
+        ...s,
+        currentScreen: "voiceReply",
+        voiceStatus: VOICE_SEND_FAILED_STATUS,
+      }));
+    }
+
+    isVoiceSendingRef.current = false;
   }, [hideNativeOverlay, state.voiceTranscript, stopVoiceReply]);
 
   const startVoiceReply = useCallback(async () => {
@@ -2705,34 +2735,35 @@ export function GlassesUI({
   }
 
   // Send message
-  function sendMessage(text: string) {
-    async function doSend() {
-      if (beeper && state.selectedChat) {
-        try {
-          await beeper.sendMessage(state.selectedChat, { text });
-          console.log("[GlassesUI] Message sent, reloading messages:", text);
+  async function sendMessage(text: string): Promise<boolean> {
+    const selectedChat = stateRef.current.selectedChat;
+    if (beeper && selectedChat) {
+      try {
+        await beeper.sendMessage(selectedChat, { text });
+        console.log("[GlassesUI] Message sent, reloading messages:", text);
 
-          // Set suppress flag to prevent WebSocket from triggering another loadMessages
-          suppressReloadRef.current = true;
-          if (suppressReloadTimeoutRef.current) {
-            clearTimeout(suppressReloadTimeoutRef.current);
-          }
-          suppressReloadTimeoutRef.current = setTimeout(() => {
-            suppressReloadRef.current = false;
-            suppressReloadTimeoutRef.current = null;
-          }, 2000); // Suppress for 2 seconds
-
-          void loadMessages(state.selectedChat);
-        } catch (e) {
-          console.error("[GlassesUI] Send failed:", e);
-          // Reload messages on failure to clear any pending state
-          void loadMessages(state.selectedChat);
+        // Set suppress flag to prevent WebSocket from triggering another loadMessages
+        suppressReloadRef.current = true;
+        if (suppressReloadTimeoutRef.current) {
+          clearTimeout(suppressReloadTimeoutRef.current);
         }
-      } else {
-        console.log("[GlassesUI] Would send:", text);
+        suppressReloadTimeoutRef.current = setTimeout(() => {
+          suppressReloadRef.current = false;
+          suppressReloadTimeoutRef.current = null;
+        }, 2000); // Suppress for 2 seconds
+
+        void loadMessages(selectedChat);
+        return true;
+      } catch (e) {
+        console.error("[GlassesUI] Send failed:", e);
+        // Reload messages on failure to clear any pending state
+        void loadMessages(selectedChat);
+        return false;
       }
+    } else {
+      console.log("[GlassesUI] Would send:", text);
+      return false;
     }
-    doSend();
   }
 
   const getDisplayLines = useCallback(

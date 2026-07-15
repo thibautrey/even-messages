@@ -443,7 +443,9 @@ export class BeeperClient {
     })
     
     if (!response.ok) {
-      throw new Error(`Failed to send message: ${response.statusText}`)
+      const responseBody = await response.text().catch(() => '')
+      const detail = responseBody.trim() || response.statusText || 'Unknown error'
+      throw new Error(`Failed to send message (${response.status}): ${detail}`)
     }
     
     return response.json()
