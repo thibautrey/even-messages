@@ -34,3 +34,16 @@ coverage/
 # Misc
 *.local
 evenmessages.ehpk
+
+# CCE (code-context-engine)
+# CCE local cache (per-machine, not for version control)
+.cce/
+# Claude Code local settings written by cce init
+.claude/settings.local.json
+.claude/settings.json
+.gitignore
+.codex/config.toml
+.codex/hooks.json
+.mcp.json
+AGENTS.md
+CLAUDE.md
