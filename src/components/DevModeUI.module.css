@@ -264,14 +264,21 @@ body {
   flex: 1;
 }
 
+.tokenGuideGallery {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
 .tokenGuideMedia {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  aspect-ratio: 16 / 9;
-  margin-bottom: 1rem;
+  aspect-ratio: 1 / 1;
+  margin: 0;
   overflow: hidden;
   background: var(--color-bc-2nd);
   border: 1px dashed var(--color-bc-4th);
@@ -297,6 +304,22 @@ body {
   font-size: 0.75rem;
   line-height: 1;
   pointer-events: none;
+}
+
+.supportNote {
+  margin: 1rem 0 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--color-bc-4th);
+  border-radius: 0.5rem;
+  background: var(--color-bc-2nd);
+  color: var(--color-tc-2nd);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.supportNote strong {
+  color: var(--color-tc-1st);
 }
 
 .tokenGuideOverlay {
@@ -353,6 +376,16 @@ body {
 
 .tokenGuideClose:hover {
   background: rgba(0, 0, 0, 0.9);
+}
+
+@media (max-width: 640px) {
+  .tokenGuideGallery {
+    grid-template-columns: 1fr;
+  }
+
+  .tokenGuideMedia {
+    aspect-ratio: 16 / 9;
+  }
 }
 
 .manualAddressDetails {
@@ -717,9 +750,6 @@ body {
 
 /* Footer */
 .footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
   flex-shrink: 0;
   min-width: 0;
   padding: 1rem 2rem;

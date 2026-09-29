@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
+    "test": "node --test",
     "type-check": "tsc --noEmit",
     "qr": "evenhub qr --http --port 5173",
     "pack": "npm run build && evenhub pack app.json dist -o messages.ehpk"

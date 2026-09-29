@@ -24,7 +24,8 @@ export function Disclaimer({ onAcknowledge }: DisclaimerProps) {
           <div className={styles.highlight}>
             <p>
               Please ensure you have Beeper Desktop installed and running with
-              Developer Mode enabled before proceeding.
+              Allow connections enabled in Settings → Integrations before
+              proceeding.
             </p>
           </div>
         </div>

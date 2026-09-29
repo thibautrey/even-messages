@@ -26,7 +26,7 @@ import {
  * This app is designed to run in the Even App WebView.
  * It uses the Even Hub SDK to display messaging content on Even Glasses.
  * 
- * Development mode shows a web UI for testing alongside the glasses display.
+ * The browser build shows a web UI for testing alongside the glasses display.
  */
 export default function App() {
   const [isGlassesConnected, setIsGlassesConnected] = useState(false)
