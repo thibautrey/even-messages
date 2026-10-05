@@ -14,7 +14,7 @@
     "pack": "npm run build && evenhub pack app.json dist -o messages.ehpk"
   },
   "dependencies": {
-    "@evenrealities/even_hub_sdk": "0.0.12",
+    "@evenrealities/even_hub_sdk": "0.0.16",
     "@jappyjan/even-better-sdk": "0.0.11",
     "even-toolkit": "^0.5.2",
     "react": "^18.2.0",
