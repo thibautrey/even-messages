@@ -40,8 +40,8 @@ const guideImages = [
 
 const currentSetupRoute = "Settings → Integrations";
 const supportNote =
-  "Please do not ask the Beeper Developer Community for help using Even Messages";
-const removedSupportCallToAction = "For help with Even Messages";
+  "Please do not ask the Beeper Developer Community for help using Message Lens";
+const removedSupportCallToAction = "For help with Message Lens";
 const removedProjectIssueUrl =
   "https://github.com/thibautrey/even-messages/issues";
 const sensitiveActionsScope = "send messages and modify your account";

@@ -382,7 +382,7 @@ export function DevModeUI({
     // Add initial info
     addLog(
       "info",
-      `Even Messages Debug Console Initialized`,
+      `Message Lens Debug Console Initialized`,
       "info",
       `Origin: ${window.location.origin}`,
     );
@@ -510,7 +510,7 @@ export function DevModeUI({
               <div className={styles.networkNotice}>
                 <strong>Using a non-Tailscale address:</strong> your current
                 Beeper URL looks like <code>{configuredHostname}</code>. If you
-                want to use Even Messages away from home, follow the{" "}
+                want to use Message Lens away from home, follow the{" "}
                 <a
                   href={TAILSCALE_SETUP_URL}
                   target="_blank"
@@ -633,7 +633,7 @@ export function DevModeUI({
       {/* Footer */}
       <footer className={styles.footer}>
         <div className={styles.footerTopRow}>
-          <p>Even Messages</p>
+          <p>Message Lens</p>
           <button className={styles.settingsButton} onClick={onOpenSettings}>
             Settings
           </button>
@@ -700,7 +700,7 @@ function SettingsForm({
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [baseUrl, setBaseUrl] = useState(
-    savedConfig?.baseUrl || "http://YOUR_COMPUTER_IP:23373",
+    savedConfig?.baseUrl || "http://localhost:23373",
   );
   const [token, setToken] = useState(savedConfig?.token || "");
   const [showToken, setShowToken] = useState(false);
@@ -808,7 +808,7 @@ function SettingsForm({
         <span className={styles.setupStepLabel}>Step {step} of 3</span>
         <h2>Connect Beeper Desktop</h2>
         <p>
-          Even Messages reads and sends your messages through Beeper Desktop.
+          Message Lens reads and sends your messages through Beeper Desktop.
           Beeper needs to stay open on your computer while you use the glasses.
         </p>
       </div>
@@ -857,7 +857,7 @@ function SettingsForm({
         <section className={styles.setupStepPanel}>
           <h3>Find the computer</h3>
           <p>
-            Even Messages will scan your local network for the Beeper Desktop API
+            Message Lens will scan your local network for the Beeper Desktop API
             and fill in the computer address automatically.
           </p>
 
@@ -921,7 +921,7 @@ function SettingsForm({
         <section className={styles.setupStepPanel}>
           <h3>Add the Beeper token</h3>
           <p>
-            The token lets Even Messages fetch your conversations and send
+            The token lets Message Lens fetch your conversations and send
             replies through Beeper Desktop.
           </p>
 
@@ -961,7 +961,7 @@ function SettingsForm({
               </li>
               <li>
                 <strong>Allow sensitive actions</strong> lets the token send messages
-                and modify your account. Enable it only if you want Even Messages to
+                and modify your account. Enable it only if you want Message Lens to
                 send replies, then create the token and paste it below.
               </li>
             </ol>
@@ -969,7 +969,7 @@ function SettingsForm({
 
           <p className={styles.supportNote}>
             <strong>Support note:</strong> Please do not ask the Beeper Developer
-            Community for help using Even Messages. It is for people building
+            Community for help using Message Lens. It is for people building
             integrations, not end-user support.
           </p>
 
@@ -1214,7 +1214,7 @@ function BeeperSettingsPane({
       </div>
 
       <p className={styles.helpText}>
-        Want to use Even Messages outside your home network?{" "}
+        Want to use Message Lens outside your home network?{" "}
         <a
           href={TAILSCALE_SETUP_URL}
           target="_blank"
@@ -1298,7 +1298,7 @@ function SpeechSettingsPane({
           type="url"
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder="https://api.example.com/v1"
+          placeholder="Enter the provider endpoint"
           required
         />
         <span className={styles.hint}>

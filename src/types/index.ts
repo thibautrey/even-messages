@@ -1,4 +1,4 @@
-// Core types for Even Messages app
+// Core types for Message Lens app
 
 export interface User {
   id: string;

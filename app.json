@@ -3,14 +3,18 @@
   "entrypoint": "index.html",
   "min_app_version": "2.0.0",
   "min_sdk_version": "0.0.12",
-  "name": "Even Messages",
+  "name": "Message Lens",
   "package_id": "solutions.pleiades.evenmessages",
   "permissions": [
     {
-      "desc": "This app needs to access the network in order to displays the messages from your computer and load links and images",
+      "desc": "Connects to Beeper Desktop on your computer and opens the setup links shown in the app.",
       "name": "network",
       "whitelist": [
-        "*"
+        "*",
+        "http://localhost:23373",
+        "https://www.beeper.com/",
+        "https://github.com/thibautrey/even-messages/blob/main/docs/TAILSCALE_SETUP.md",
+        "https://reactjs.org/docs/error-decoder.html?invariant="
       ]
     },
     {
@@ -21,5 +25,5 @@
   "supported_languages": [
     "en"
   ],
-  "version": "1.0.10"
+  "version": "1.0.11"
 }

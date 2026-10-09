@@ -1,5 +1,5 @@
 /**
- * Even Messages - Glasses UI Component
+ * Message Lens - Glasses UI Component
  *
  * Optimized for Even G2 display: 576x288 pixels
  * Uses full width for maximum readability.
@@ -646,12 +646,12 @@ function buildAccountsDisplay(
 ): DisplayLine[] {
   const lines: DisplayLine[] = [];
 
-  // Header: "Even Messages" + time (+ DEMO indicator if active)
+  // Header: "Message Lens" + time (+ DEMO indicator if active)
   const time = new Date().toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
-  const title = state.demoMode ? "Even [DEMO]" : "Even Messages";
+  const title = state.demoMode ? "Lens [DEMO]" : "Message Lens";
   lines.push(line(buildHeaderLine(title, time), "inverted"));
 
   // "All Chats" option
@@ -1034,7 +1034,7 @@ function buildStartupDisplay(): DisplayLine[] {
     hour: "2-digit",
     minute: "2-digit",
   });
-  lines.push(line(buildHeaderLine("Even Messages", time), "inverted"));
+  lines.push(line(buildHeaderLine("Message Lens", time), "inverted"));
   lines.push(sep());
   lines.push(line("  Loading...", "normal"));
   lines.push(line("", "normal"));
@@ -2791,7 +2791,7 @@ export function GlassesUI({
         case "voiceReply":
           return buildVoiceReplyDisplay(snapshot);
         default:
-          return [line("Even Messages", "inverted")];
+          return [line("Message Lens", "inverted")];
       }
     },
     [],
@@ -3007,7 +3007,7 @@ export function GlassesUI({
           borderColor: 0,
           borderRadius: 0,
           paddingLength: 6,
-          content: "Even Messages started\nPlease continue on phone",
+          content: "Message Lens started\nPlease continue on phone",
           isEventCapture: 0,
         }),
       ],

@@ -1,4 +1,4 @@
-# Even Messages - Implementation Plan
+# Message Lens - Implementation Plan
 
 ## Overview
 An Even Glasses messaging application that integrates with the Beeper Desktop API to display messages on Even Glasses. The app runs inside the Even App WebView and uses the Even Hub SDK to render content on the glasses display.
@@ -15,7 +15,7 @@ An Even Glasses messaging application that integrates with the Beeper Desktop AP
 ┌─────────────────────────────────────────────────────────┐
 │                     Even App                              │
 │  ┌─────────────────────────────────────────────────┐     │
-│  │              Even Messages (WebView)             │     │
+│  │              Message Lens (WebView)             │     │
 │  │                                                   │     │
 │  │  ┌─────────────────────────────────────────┐    │     │
 │  │  │  EvenMessagesApp (GlassesUI)            │    │     │
@@ -133,7 +133,7 @@ Authorization: Bearer {token}
 ### 1. Accounts View (Entry)
 ```
 ┌──────────────────────────────────┐
-│ 📱 Even Messages                  │  ← Text container
+│ 📱 Message Lens                  │  ← Text container
 ├──────────────────────────────────┤
 │ 📱 WhatsApp                      │
 │ 📱 Signal                        │  ← List container

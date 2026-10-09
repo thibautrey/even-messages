@@ -1,8 +1,8 @@
 {
   "name": "even-messages",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "private": true,
-  "description": "Even Glasses messaging app using Beeper API",
+  "description": "Smart glasses messaging app using the Beeper API",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc && vite build",

@@ -6,11 +6,11 @@ import './styles/variables.css'
 
 // Global error handler for development
 window.addEventListener('error', (event) => {
-  console.error('[Even Messages] Error:', event.error)
+  console.error('[Message Lens] Error:', event.error)
 })
 
 window.addEventListener('unhandledrejection', (event) => {
-  console.error('[Even Messages] Unhandled rejection:', event.reason)
+  console.error('[Message Lens] Unhandled rejection:', event.reason)
 })
 
 const root = document.getElementById('root')

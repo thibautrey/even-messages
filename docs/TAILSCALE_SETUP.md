@@ -1,21 +1,21 @@
-# Use Even Messages away from home with Tailscale
+# Use Message Lens away from home with Tailscale
 
-This guide explains how to keep using **Even Messages** when you are **not on your home Wi-Fi**.
+This guide explains how to keep using **Message Lens** when you are **not on your home Wi-Fi**.
 
 ---
 
 ## The short version
 
-Normally, Even Messages talks to **Beeper Desktop** on your home computer using your local home network.
+Normally, Message Lens talks to **Beeper Desktop** on your home computer using your local home network.
 
 When you leave home, that connection stops working.
 
 **Tailscale** fixes this by creating a private connection between:
 
 - your **home computer** (the one running Beeper Desktop)
-- your **phone** (the one running the Even app / Even Messages)
+- your **phone** (the one running the Even app / Message Lens)
 
-Once both devices are connected to Tailscale, Even Messages can reach your home computer even when you are outside.
+Once both devices are connected to Tailscale, Message Lens can reach your home computer even when you are outside.
 
 ---
 
@@ -42,7 +42,7 @@ Good news:
 You will need:
 
 1. The **computer at home** that runs **Beeper Desktop**
-2. Your **phone** that runs the **Even app / Even Messages**
+2. Your **phone** that runs the **Even app / Message Lens**
 3. A **Tailscale account**
 4. Your **Beeper API token**
 5. A few minutes for the first setup
@@ -59,7 +59,7 @@ You only need to set this up once:
 2. Install Tailscale on your phone
 3. Sign in to the **same Tailscale account** on both devices
 4. Find the Tailscale address of your home computer
-5. Put that address into Even Messages
+5. Put that address into Message Lens
 
 After that, using the app away from home is much easier.
 
@@ -93,7 +93,7 @@ Leave Tailscale installed and signed in on this computer.
 
 ### Step 4: Keep this computer available
 
-For Even Messages to work when you are away:
+For Message Lens to work when you are away:
 
 - the computer must be **turned on**
 - Tailscale must be **connected**
@@ -105,7 +105,7 @@ If the computer is asleep, shut down, or disconnected from the internet, the app
 
 ## Part 2 - Install Tailscale on your phone
 
-This is the phone that runs the **Even app / Even Messages**.
+This is the phone that runs the **Even app / Message Lens**.
 
 ### Step 1: Install Tailscale
 
@@ -169,19 +169,19 @@ On your home computer:
 3. Open **Settings → Integrations**
 4. Under **Beeper Desktop API**, turn on **Allow connections**
 5. Under **Approved connections**, select the plus button to **Create a new token for Beeper Desktop API**
-6. **Allow sensitive actions** lets the token send messages and modify your account. Enable it only if you want Even Messages to send replies, then copy the token
+6. **Allow sensitive actions** lets the token send messages and modify your account. Enable it only if you want Message Lens to send replies, then copy the token
 
-If you already use Even Messages at home, you may already have this token.
+If you already use Message Lens at home, you may already have this token.
 
-> **Support note:** Please do not ask the Beeper Developer Community for help using Even Messages. It is for people building integrations, not end-user support.
+> **Support note:** Please do not ask the Beeper Developer Community for help using Message Lens. It is for people building integrations, not end-user support.
 
 Keep Beeper Desktop running.
 
 ---
 
-## Part 5 - Configure Even Messages
+## Part 5 - Configure Message Lens
 
-Now open **Even Messages** and go to the app settings.
+Now open **Message Lens** and go to the app settings.
 
 You will enter two things:
 
@@ -219,13 +219,13 @@ Example:
 
 `http://100.101.102.103:23373`
 
-If you still use `localhost`, Even Messages will try to find Beeper on the phone itself, not on your home computer.
+If you still use `localhost`, Message Lens will try to find Beeper on the phone itself, not on your home computer.
 
 ---
 
 ## What to do every time you are outside
 
-Before opening Even Messages, quickly check these 5 things:
+Before opening Message Lens, quickly check these 5 things:
 
 1. Your **home computer is on**
 2. **Beeper Desktop** is open on that computer
@@ -247,7 +247,7 @@ A good idea is to test this once before you really need it.
 2. Turn **off your phone's Wi-Fi**
 3. Leave **mobile data** on
 4. Make sure **Tailscale stays connected** on the phone
-5. Open Even Messages and try to connect
+5. Open Message Lens and try to connect
 
 If it works on mobile data, it should also work when you are away from home.
 
@@ -257,7 +257,7 @@ If it works on mobile data, it should also work when you are away from home.
 
 If it does not work, check the items below.
 
-### Problem: Even Messages cannot connect
+### Problem: Message Lens cannot connect
 
 Check:
 
@@ -290,7 +290,7 @@ Right when away from home:
 
 ### Problem: The home computer is asleep
 
-If the computer is sleeping, Even Messages cannot reach it.
+If the computer is sleeping, Message Lens cannot reach it.
 
 You may need to change your computer settings so it does not go to sleep too aggressively.
 At minimum, make sure it stays on when you want remote access.
@@ -319,7 +319,7 @@ If things are not working on public Wi-Fi, try:
 
 ### Problem: The API token does not work
 
-If Even Messages still cannot connect, try getting a fresh API token from **Beeper Desktop** and pasting it again.
+If Message Lens still cannot connect, try getting a fresh API token from **Beeper Desktop** and pasting it again.
 
 ---
 
@@ -366,7 +366,7 @@ If you want the simplest possible checklist, use this:
 - [ ] Home computer is on
 - [ ] Beeper Desktop is open
 - [ ] Tailscale connected on both devices
-- [ ] Even Messages API Base URL uses the Tailscale IP
+- [ ] Message Lens API Base URL uses the Tailscale IP
 - [ ] API token pasted correctly
 
-Once this is done, you should be able to use Even Messages even when you are away from home.
+Once this is done, you should be able to use Message Lens even when you are away from home.

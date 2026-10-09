@@ -1,4 +1,4 @@
-# Even Messages
+# Message Lens
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Even%20G2%20Glasses-6366f1?style=for-the-badge" alt="Platform">
@@ -57,7 +57,7 @@ npm run dev
 1. In Beeper Desktop, open **Settings → Integrations**.
 2. Under **Beeper Desktop API**, turn on **Allow connections**.
 3. Under **Approved connections**, select the plus button to **Create a new token for Beeper Desktop API**.
-4. **Allow sensitive actions** lets the token send messages and modify your account. Enable it only if you want Even Messages to send replies, then create and copy the token.
+4. **Allow sensitive actions** lets the token send messages and modify your account. Enable it only if you want Message Lens to send replies, then create and copy the token.
 
 <p align="center">
   <img src="./public/beeper-desktop-setup/01-integrations.png" alt="Beeper Desktop Integrations settings with Allow connections enabled" width="700">
@@ -71,9 +71,9 @@ npm run dev
   <img src="./public/beeper-desktop-setup/03-create-access-token.png" alt="Beeper Desktop dialog with a callout that Allow sensitive actions can send messages and modify your account; enable it only for replies" width="700">
 </p>
 
-> **Support note:** Please do not ask the Beeper Developer Community for help using Even Messages. It is for people building integrations, not end-user support.
+> **Support note:** Please do not ask the Beeper Developer Community for help using Message Lens. It is for people building integrations, not end-user support.
 
-#### Connect Even Messages
+#### Connect Message Lens
 
 1. Open the app at `http://localhost:5173`.
 2. Click **Settings** in the top-right corner.
